@@ -11,6 +11,7 @@ video_maker.py
 import os
 import time
 import logging
+import platform
 import requests
 from pathlib import Path
 from functools import wraps
@@ -48,10 +49,14 @@ DATA_DIR.mkdir(exist_ok=True)
 BG_PATH     = DATA_DIR / "background.png"
 OUTPUT_PATH = DATA_DIR / "output_shorts.mp4"
 
-FONT_PATH   = "C:/Windows/Fonts/malgun.ttf"   # 맑은 고딕 (Windows)
-FONT_SIZE   = 64
+if platform.system() == "Windows":
+    FONT_PATH = "C:/Windows/Fonts/malgun.ttf"
+else:
+    FONT_PATH = "/usr/share/fonts/truetype/nanum/NanumGothic.ttf"
+
+FONT_SIZE   = 80
 FONT_COLOR  = "white"
-BORDER_W    = 4
+BORDER_W    = 3
 BORDER_COLOR = "black"
 
 # DALL-E 3 세로형 해상도 (유튜브 쇼츠 9:16 비율)
@@ -101,21 +106,21 @@ def make_video(concept: dict, mp3_path: Path) -> Path:
     """
     logger.info("=== 영상 제작 파이프라인 시작 ===")
 
-    bg_path = _generate_background(concept)
-    output  = _compose_video(bg_path, mp3_path, concept["title"])
+    _generate_background(concept, BG_PATH)
+    _compose_video(BG_PATH, mp3_path, concept["title"], OUTPUT_PATH)
 
-    logger.info("=== 영상 제작 완료: %s ===", output)
-    return output
+    logger.info("=== 영상 제작 완료: %s ===", OUTPUT_PATH)
+    return OUTPUT_PATH
 
 
 # ---------------------------------------------------------------------------
 # 내부 헬퍼 함수
 # ---------------------------------------------------------------------------
 @with_retry()
-def _generate_background(concept: dict) -> Path:
+def _generate_background(concept: dict, out_path: Path) -> Path:
     """
     DALL-E 3로 장르/분위기에 어울리는 세로형 배경 이미지를 생성하고
-    data/background.png 로 저장.
+    지정된 경로(out_path)에 저장.
 
     프롬프트: concept['mood'] + concept['genre'] 기반 영문 이미지 프롬프트
     해상도: 1024x1792 (유튜브 쇼츠 9:16)
@@ -124,10 +129,8 @@ def _generate_background(concept: dict) -> Path:
     mood  = concept.get("mood", "calm")
 
     prompt = (
-        f"A stunning vertical music album cover artwork for a {genre} track. "
-        f"Mood: {mood}. "
-        "Abstract, cinematic, vibrant colors, no text, no watermark. "
-        "Ultra high quality, 9:16 portrait orientation."
+        f"Youtube shorts background, no text, emotional artwork. "
+        f"Genre: {genre}, Mood: {mood}."
     )
     logger.info("DALL-E 3 이미지 생성 중... 프롬프트: '%s'", prompt[:80])
 
@@ -146,14 +149,14 @@ def _generate_background(concept: dict) -> Path:
     img_response = requests.get(image_url, timeout=60)
     img_response.raise_for_status()
 
-    BG_PATH.write_bytes(img_response.content)
-    size_kb = BG_PATH.stat().st_size / 1024
-    logger.info("배경 이미지 저장 완료: %s (%.1f KB)", BG_PATH.name, size_kb)
-    return BG_PATH
+    out_path.write_bytes(img_response.content)
+    size_kb = out_path.stat().st_size / 1024
+    logger.info("배경 이미지 저장 완료: %s (%.1f KB)", out_path.name, size_kb)
+    return out_path
 
 
 @with_retry()
-def _compose_video(bg_path: Path, mp3_path: Path, title: str) -> Path:
+def _compose_video(bg_path: Path, mp3_path: Path, title: str, output_path: Path) -> Path:
     """
     FFmpeg로 정적 이미지 + mp3를 합성하여 mp4 생성.
 
@@ -161,7 +164,7 @@ def _compose_video(bg_path: Path, mp3_path: Path, title: str) -> Path:
     - drawtext 필터로 영상 중앙에 제목 자막 삽입
     - pix_fmt yuv420p: 유튜브/SNS 호환성 확보
     """
-    logger.info("FFmpeg 합성 시작: %s + %s → %s", bg_path.name, mp3_path.name, OUTPUT_PATH.name)
+    logger.info("FFmpeg 합성 시작: %s + %s → %s", bg_path.name, mp3_path.name, output_path.name)
 
     # FFmpeg 특수문자 이스케이프 (drawtext 필터용)
     safe_title = _escape_drawtext(title)
@@ -177,8 +180,13 @@ def _compose_video(bg_path: Path, mp3_path: Path, title: str) -> Path:
         fontcolor=FONT_COLOR,
         borderw=BORDER_W,
         bordercolor=BORDER_COLOR,
+        shadowx=2,
+        shadowy=2,
+        shadowcolor="black",
+        box=1,
+        boxcolor="black@0.5",
         x="(w-text_w)/2",
-        y="(h-text_h)/2",
+        y="(h-text_h)/2 - 100",
     )
 
     (
@@ -186,7 +194,7 @@ def _compose_video(bg_path: Path, mp3_path: Path, title: str) -> Path:
         .output(
             video_with_text,
             audio_stream,
-            str(OUTPUT_PATH),
+            str(output_path),
             vcodec="libx264",
             acodec="aac",
             audio_bitrate="192k",  # 유튜브 쇼츠 고음질 유지를 위한 오디오 비트레이트 고정
@@ -197,9 +205,9 @@ def _compose_video(bg_path: Path, mp3_path: Path, title: str) -> Path:
         .run(quiet=True)
     )
 
-    size_mb = OUTPUT_PATH.stat().st_size / (1024 * 1024)
-    logger.info("영상 합성 완료: %s (%.1f MB)", OUTPUT_PATH.name, size_mb)
-    return OUTPUT_PATH
+    size_mb = output_path.stat().st_size / (1024 * 1024)
+    logger.info("영상 합성 완료: %s (%.1f MB)", output_path.name, size_mb)
+    return output_path
 
 
 def _escape_drawtext(text: str) -> str:
@@ -227,14 +235,9 @@ if __name__ == "__main__":
         "title": "청량한 봄 Chillhop",
     }
 
-    # data/ 에서 가장 최근 mp3 파일 자동 탐색
-    mp3_files = sorted(DATA_DIR.glob("*.mp3"), key=lambda p: p.stat().st_mtime, reverse=True)
-    if not mp3_files:
-        print("[오류] data/ 폴더에 mp3 파일이 없습니다. generator.py를 먼저 실행하세요.")
-        raise SystemExit(1)
+    # 지정된 오디오 경로로 단독 테스트
+    test_mp3_path = DATA_DIR / "20260324_audio.mp3"
+    print(f"[테스트] mp3: {test_mp3_path}")
 
-    mp3_path = mp3_files[0]
-    print(f"[테스트] mp3: {mp3_path}")
-
-    output = make_video(test_concept, mp3_path)
+    output = make_video(test_concept, test_mp3_path)
     print(f"\n[완료] 영상 저장 경로: {output}")
