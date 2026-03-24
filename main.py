@@ -5,10 +5,13 @@ main.py
 """
 
 import sys
+import os
 import time
 import shutil
 import logging
+import requests
 from pathlib import Path
+from dotenv import load_dotenv
 
 # 로깅 설정
 logging.basicConfig(
@@ -27,6 +30,18 @@ from src.uploader import upload_to_youtube
 BASE_DIR = Path(__file__).parent
 DATA_DIR = BASE_DIR / "data"
 ARCHIVE_DIR = DATA_DIR / "archive"
+
+# 환경변수 및 디스코드 웹훅 설정
+load_dotenv(dotenv_path=BASE_DIR / ".env")
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
+
+def send_discord_notification(message: str):
+    if not DISCORD_WEBHOOK_URL:
+        return
+    try:
+        requests.post(DISCORD_WEBHOOK_URL, json={"content": message}, timeout=10)
+    except Exception as e:
+        logger.warning("디스코드 알림 전송 실패: %s", e)
 
 def main():
     logger.info("========== AI Music Publisher 자동화 공장 가동 ==========")
@@ -75,9 +90,14 @@ def main():
             shutil.move(str(BG_PATH), str(ARCHIVE_DIR / bg_new_name))
 
         logger.info("========== 🚀 모든 파이프라인이 성공적으로 완료되었습니다 ==========")
+        
+        success_msg = f"🎉 **[성공] AI 음악 배포 완료!**\n> **제목:** {title}\n> **링크:** https://youtu.be/{video_id}"
+        send_discord_notification(success_msg)
 
     except Exception as e:
         logger.critical("파이프라인 실행 중 치명적인 오류 발생: %s", e, exc_info=True)
+        fail_msg = f"🚨 **[실패] AI 음악 자동화 파이프라인 오류 발생**\n> **에러 내용:** `{str(e)}`"
+        send_discord_notification(fail_msg)
         sys.exit(1)
 
 if __name__ == "__main__":
