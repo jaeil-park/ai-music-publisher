@@ -227,7 +227,12 @@ def generate_daily_concept() -> dict:
     """
     logger.info("OpenAI로 오늘의 음악 컨셉 기획 시작...")
 
-    today      = datetime.date.today()
+    # 현재 KST(한국 시간) 계산 (GitHub Actions의 UTC 환경 보정)
+    now_utc    = datetime.datetime.utcnow()
+    now_kst    = now_utc + datetime.timedelta(hours=9)
+    today      = now_kst.date()
+    hour       = now_kst.hour
+
     weekday_kr = ["월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일"][today.weekday()]
     month      = today.month
     season     = (
@@ -237,6 +242,16 @@ def generate_daily_concept() -> dict:
         "겨울"
     )
 
+    # 시간대에 따른 분위기 키워드 분기
+    if 5 <= hour < 12:
+        time_of_day, time_mood = "아침", "상쾌하고 활기찬, 희망찬, 모닝 커피"
+    elif 12 <= hour < 17:
+        time_of_day, time_mood = "오후", "나른함을 깨는, 리드미컬한, 집중, 경쾌한"
+    elif 17 <= hour < 22:
+        time_of_day, time_mood = "저녁", "차분하고 감성적인, 하루를 마무리하는, 칠링"
+    else:
+        time_of_day, time_mood = "밤/새벽", "몽환적인, 딥한, 수면 유도, 로파이"
+
     system_prompt = (
         "당신은 음악 큐레이터입니다. 매일 다른 분위기의 음악 컨셉을 기획합니다.\n"
         "반드시 아래 JSON 형식으로만 응답하세요. 다른 텍스트는 절대 포함하지 마세요.\n"
@@ -244,14 +259,26 @@ def generate_daily_concept() -> dict:
         '  "genre": "장르명 (영문)",\n'
         '  "mood": "분위기 키워드 (한글, 3단어 이내)",\n'
         '  "suno_prompt": "Suno AI 음악 생성 프롬프트 (영문, 60자 이내)",\n'
-        '  "title": "유튜브 쇼츠용 제목 (한글, 20자 이내)",\n'
-        '  "description": "유튜브 설명란 소개 (한글, 60자 이내)"\n'
+        '  "title": "유튜브 쇼츠용 제목 (한글, 시선을 끄는 매력적인 유튜브 감성 제목, 30자 이내)",\n'
+        '  "description": "유튜브 설명란 소개 및 트렌디한 해시태그 3~5개 포함 (한글, 100자 이내)"\n'
         "}"
     )
+    
+    weekend_guide = (
+        "\n\n[특별 지침] 오늘은 주말(토/일)입니다! 주말의 들뜬 기분을 반영하여, 시간대와 상관없이 "
+        "에너제틱한 파티 음악, EDM, 페스티벌, 드라이브에 어울리는 신나는 팝 등 경쾌한 장르를 최우선으로 기획하세요."
+    ) if today.weekday() >= 5 else ""
+    
     user_prompt = (
-        f"오늘 날짜: {today.isoformat()} ({weekday_kr}, {season})\n\n"
-        "이 날짜·요일·계절을 seed로 활용해 오늘에 어울리는 독특한 음악 컨셉 하나를 기획해 주세요.\n"
-        "월요일→에너제틱, 금요일→파티, 주말→여유, 봄→청량, 여름→신남, 가을→감성, 겨울→포근한 분위기를 참고하세요."
+        f"현재 한국 시간: {now_kst.strftime('%Y-%m-%d %H:%M')} ({weekday_kr}, {season}, {time_of_day})\n\n"
+        f"이 시간대의 특징('{time_of_day}' - {time_mood})과 계절감을 seed로 활용해 "
+        "지금 이 순간 듣기 딱 좋은 독특하고 매력적인 음악 컨셉 하나를 기획해 주세요.\n"
+        "시간대마다 전혀 다른 느낌이 나도록 장르와 악기 구성을 창의적으로 제안해야 합니다."
+        "\n\n[제목 작성 지침] 유튜브 제목('title')은 밋밋하게 쓰지 말고, 시청자의 호기심을 자극하고 클릭을 유도하는 '어그로/후킹' 감성으로 작성하세요. "
+        "(예: '나만 알고 싶은 새벽 2시 감성 플리', '10초 만에 분위기 찢는 퇴근길 노래', '듣자마자 소름 돋는 아침 텐션업 플레이리스트')"
+        "\n\n[설명 및 해시태그 지침] 유튜브 설명란('description')에는 시청자의 공감을 이끌어내는 감성적인 소개글과 함께, 검색 노출을 극대화할 수 있는 트렌디한 해시태그(#)를 3~5개 이상 풍부하게 포함하세요. "
+        "(예: #감성음악 #출근길 #플레이리스트 #알고리즘 #인디음악)"
+        f"{weekend_guide}"
     )
 
     client   = OpenAI(api_key=OPENAI_API_KEY)
@@ -298,7 +325,8 @@ def generate_and_download_audio(concept: dict) -> Path:
     session.headers.update(_SUNO_HEADERS)
 
     clip_ids  = _request_suno_generation(concept, session)
-    audio_url = _poll_until_complete(clip_ids[0], session)
+    audio_url, lyrics = _poll_until_complete(clip_ids[0], session)
+    concept["lyrics"] = lyrics
     file_path = _download_mp3(audio_url, session)
     logger.info("=== 음원 파이프라인 완료: %s ===", file_path)
     return file_path
@@ -331,7 +359,7 @@ def _request_suno_generation(concept: dict, session: requests.Session) -> list[s
         "prompt":            concept["suno_prompt"],
         "tags":              concept.get("genre", ""),
         "title":             concept.get("title", ""),
-        "make_instrumental": True,
+        "make_instrumental": False,  # 보컬 및 가사가 생성되도록 False로 변경
         "mv":                "chirp-crow",
         "negative_tags":     "",
         "transaction_uuid":  str(uuid.uuid4()),
@@ -365,7 +393,7 @@ def _request_suno_generation(concept: dict, session: requests.Session) -> list[s
 
 
 @with_retry()
-def _poll_until_complete(clip_id: str, session: requests.Session) -> str:
+def _poll_until_complete(clip_id: str, session: requests.Session) -> tuple[str, str]:
     """clip_id 상태를 폴링해 완료 시 audio_url 반환."""
     logger.info("음원 생성 대기 중... (clip_id: %s)", clip_id)
     elapsed = 0
@@ -393,7 +421,10 @@ def _poll_until_complete(clip_id: str, session: requests.Session) -> str:
                 raise ValueError("status=complete이지만 audio_url이 없습니다.")
             logger.info("음원 생성 완료! CDN 파일 동기화를 위해 15초 대기합니다...")
             time.sleep(15)
-            return audio_url
+        
+        # Suno가 자동 생성했거나 프롬프트로 들어간 가사 추출
+        lyrics = (clips[0].get("metadata") or {}).get("prompt", "")
+        return audio_url, lyrics
 
         if status in ("error", "failed"):
             raise RuntimeError(f"Suno 생성 실패: {status}")

@@ -12,7 +12,9 @@ import os
 import time
 import logging
 import platform
+import datetime
 import requests
+import textwrap
 from pathlib import Path
 from functools import wraps
 from dotenv import load_dotenv
@@ -128,9 +130,29 @@ def _generate_background(concept: dict, out_path: Path) -> Path:
     genre = concept.get("genre", "music")
     mood  = concept.get("mood", "calm")
 
+    # 현재 KST(한국 시간) 계산
+    now_utc = datetime.datetime.utcnow()
+    now_kst = now_utc + datetime.timedelta(hours=9)
+    hour = now_kst.hour
+    is_weekend = now_kst.weekday() >= 5
+
+    # 시간대에 따른 시각적 분위기/색감(Lighting/Color palette) 영문 프롬프트 분기
+    if 5 <= hour < 12:
+        lighting = "Morning sunlight, bright and refreshing color palette, warm sunrise lighting"
+    elif 12 <= hour < 17:
+        lighting = "Clear daylight, vibrant and energetic color palette, vivid"
+    elif 17 <= hour < 22:
+        lighting = "Sunset golden hour, calm and warm color palette, twilight"
+    else:
+        lighting = "Night time, dark and moody color palette, neon or moonlight, lo-fi aesthetic"
+
+    # 주말일 경우 파티/신나는 시각적 요소 추가
+    weekend_visual = ", energetic party vibe, festival, dynamic and vibrant" if is_weekend else ""
+
     prompt = (
         f"Youtube shorts background, no text, emotional artwork. "
-        f"Genre: {genre}, Mood: {mood}."
+        f"Genre: {genre}, Mood: {mood}. "
+        f"Visual style: {lighting}{weekend_visual}."
     )
     logger.info("DALL-E 3 이미지 생성 중... 프롬프트: '%s'", prompt[:80])
 
@@ -166,8 +188,11 @@ def _compose_video(bg_path: Path, mp3_path: Path, title: str, output_path: Path)
     """
     logger.info("FFmpeg 합성 시작: %s + %s → %s", bg_path.name, mp3_path.name, output_path.name)
 
+    # 텍스트가 화면을 벗어나지 않도록 파이썬 textwrap으로 줄바꿈 처리 (가로 해상도 고려 약 14자 기준)
+    wrapped_title = textwrap.fill(title, width=14)
+
     # FFmpeg 특수문자 이스케이프 (drawtext 필터용)
-    safe_title = _escape_drawtext(title)
+    safe_title = _escape_drawtext(wrapped_title)
 
     video_stream = ffmpeg.input(str(bg_path), loop=1, framerate=25)
     audio_stream = ffmpeg.input(str(mp3_path))
@@ -187,6 +212,7 @@ def _compose_video(bg_path: Path, mp3_path: Path, title: str, output_path: Path)
         boxcolor="black@0.5",
         x="(w-text_w)/2",
         y="(h-text_h)/2 - 100",
+        line_spacing=20,  # 여러 줄일 경우 가독성을 위한 줄 간격 추가
     )
 
     (

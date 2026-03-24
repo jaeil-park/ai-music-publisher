@@ -50,13 +50,18 @@ def main():
         description = concept.get("description", "AI가 작곡한 오늘의 감성 멜로디입니다.")
         tags = ["AI음악", concept.get("genre", "Music"), concept.get("mood", "감성"), "Shorts"]
 
+        # 생성된 가사가 있다면 유튜브 설명란에 추가
+        if concept.get("lyrics"):
+            description += f"\n\n[가사]\n{concept['lyrics'].strip()}"
+
         # 실제 서비스 배포이므로 'public(공개)' 상태로 업로드
         video_id = upload_to_youtube(
             video_path=str(mp4_path),
             title=title,
             description=description,
             tags=tags,
-            privacy_status="public"
+            privacy_status="public",
+            thumbnail_path=str(BG_PATH)
         )
         logger.info("🎉 유튜브 업로드 성공! Video URL: https://youtu.be/%s", video_id)
 

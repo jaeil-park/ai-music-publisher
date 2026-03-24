@@ -120,7 +120,7 @@ def get_authenticated_service():
 # 업로드 메인 로직
 # ---------------------------------------------------------------------------
 @with_retry()
-def upload_to_youtube(video_path: str, title: str, description: str, tags: list, privacy_status: str = "private") -> str:
+def upload_to_youtube(video_path: str, title: str, description: str, tags: list, privacy_status: str = "private", thumbnail_path: str = None) -> str:
     """
     지정된 영상을 유튜브 쇼츠로 업로드.
     
@@ -130,6 +130,7 @@ def upload_to_youtube(video_path: str, title: str, description: str, tags: list,
         description: 유튜브 설명란 내용
         tags: 검색 태그 리스트
         privacy_status: 영상 공개 상태 (public, private, unlisted)
+        thumbnail_path: 업로드할 맞춤 썸네일 이미지의 절대 경로 (선택)
         
     Returns:
         업로드 성공 시 생성된 유튜브 비디오 ID 반환
@@ -173,6 +174,19 @@ def upload_to_youtube(video_path: str, title: str, description: str, tags: list,
     video_id = response.get("id")
     logger.info("=== 유튜브 업로드 성공! ===")
     logger.info("비디오 ID: %s", video_id)
+
+    # 맞춤 썸네일 업로드
+    if thumbnail_path and os.path.exists(thumbnail_path):
+        logger.info("맞춤 썸네일 업로드 중... (%s)", thumbnail_path)
+        try:
+            youtube.thumbnails().set(
+                videoId=video_id,
+                media_body=MediaFileUpload(thumbnail_path)
+            ).execute()
+            logger.info("썸네일 업로드 성공!")
+        except HttpError as e:
+            logger.warning("썸네일 업로드 실패 (채널 인증/권한 부족일 수 있습니다): %s", e)
+
     logger.info("유튜브 스튜디오 링크: https://studio.youtube.com/video/%s/edit", video_id)
     
     return video_id
