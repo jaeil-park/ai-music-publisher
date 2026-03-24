@@ -391,7 +391,8 @@ def _poll_until_complete(clip_id: str, session: requests.Session) -> str:
             audio_url = clips[0].get("audio_url")
             if not audio_url:
                 raise ValueError("status=complete이지만 audio_url이 없습니다.")
-            logger.info("음원 생성 완료!")
+            logger.info("음원 생성 완료! CDN 파일 동기화를 위해 15초 대기합니다...")
+            time.sleep(15)
             return audio_url
 
         if status in ("error", "failed"):
