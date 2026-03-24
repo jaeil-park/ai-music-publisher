@@ -152,7 +152,8 @@ def upload_to_youtube(video_path: str, title: str, description: str, tags: list,
         },
         "status": {
             "privacyStatus": privacy_status,
-            "selfDeclaredMadeForKids": False
+            "selfDeclaredMadeForKids": False,
+            "containsSyntheticMedia": True
         }
     }
     
