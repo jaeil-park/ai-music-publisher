@@ -21,10 +21,11 @@ try:
     from googleapiclient.discovery import build
     from googleapiclient.http import MediaFileUpload
     from googleapiclient.errors import HttpError
+    import ffmpeg
 except ImportError:
     raise ImportError(
         "Google API 관련 패키지가 없습니다. 설치 후 재실행하세요:\n"
-        "    pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib"
+        "    pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib ffmpeg-python"
     )
 
 # ---------------------------------------------------------------------------
@@ -178,15 +179,30 @@ def upload_to_youtube(video_path: str, title: str, description: str, tags: list,
 
     # 맞춤 썸네일 업로드
     if thumbnail_path and os.path.exists(thumbnail_path):
-        logger.info("맞춤 썸네일 업로드 중... (%s)", thumbnail_path)
         try:
+            # 2MB(2,097,152 bytes) 초과 시 ffmpeg로 용량 압축 (JPG 변환)
+            file_size = os.path.getsize(thumbnail_path)
+            if file_size > 2000000:
+                logger.info("썸네일 용량(%.1fMB)이 2MB를 초과하여 압축을 진행합니다...", file_size / (1024 * 1024))
+                compressed_thumb = str(Path(thumbnail_path).with_name("compressed_thumb.jpg"))
+                (
+                    ffmpeg
+                    .input(thumbnail_path)
+                    .output(compressed_thumb, vframes=1, format="image2")
+                    .overwrite_output()
+                    .run(quiet=True)
+                )
+                thumbnail_path = compressed_thumb
+                logger.info("썸네일 압축 완료. 새로운 크기: %.1fMB", os.path.getsize(thumbnail_path) / (1024 * 1024))
+
+            logger.info("맞춤 썸네일 업로드 중... (%s)", thumbnail_path)
             youtube.thumbnails().set(
                 videoId=video_id,
                 media_body=MediaFileUpload(thumbnail_path)
             ).execute()
             logger.info("썸네일 업로드 성공!")
-        except HttpError as e:
-            logger.warning("썸네일 업로드 실패 (채널 인증/권한 부족일 수 있습니다): %s", e)
+        except Exception as e:
+            logger.warning("썸네일 업로드 실패 (용량 초과 또는 권한 문제): %s", e)
 
     logger.info("유튜브 스튜디오 링크: https://studio.youtube.com/video/%s/edit", video_id)
     
