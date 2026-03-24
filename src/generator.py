@@ -422,9 +422,9 @@ def _poll_until_complete(clip_id: str, session: requests.Session) -> tuple[str, 
             logger.info("음원 생성 완료! CDN 파일 동기화를 위해 15초 대기합니다...")
             time.sleep(15)
         
-        # Suno가 자동 생성했거나 프롬프트로 들어간 가사 추출
-        lyrics = (clips[0].get("metadata") or {}).get("prompt", "")
-        return audio_url, lyrics
+            # Suno가 자동 생성했거나 프롬프트로 들어간 가사 추출
+            lyrics = (clips[0].get("metadata") or {}).get("prompt", "")
+            return audio_url, lyrics
 
         if status in ("error", "failed"):
             raise RuntimeError(f"Suno 생성 실패: {status}")
