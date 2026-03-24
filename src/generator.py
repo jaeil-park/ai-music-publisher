@@ -421,8 +421,8 @@ def _poll_until_complete(clip_id: str, session: requests.Session) -> tuple[str, 
                 raise ValueError("status=complete이지만 audio_url이 없습니다.")
             logger.info("음원 생성 완료! CDN 파일 동기화를 위해 15초 대기합니다...")
             time.sleep(15)
-        
-            # Suno가 자동 생성했거나 프롬프트로 들어간 가사 추출
+            
+            # [수정 확인용 주석] Suno 가사 추출 (정확한 들여쓰기 유지)
             lyrics = (clips[0].get("metadata") or {}).get("prompt", "")
             return audio_url, lyrics
 
