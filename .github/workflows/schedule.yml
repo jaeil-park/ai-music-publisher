@@ -31,10 +31,14 @@ jobs:
           pip install -r requirements.txt
 
       - name: Restore Secret Files
+        env:
+          SECRET_ENV: ${{ secrets.ENV_FILE }}
+          SECRET_CLIENT: ${{ secrets.CLIENT_SECRETS_JSON }}
+          SECRET_TOKEN: ${{ secrets.TOKEN_JSON }}
         run: |
-          echo "${{ secrets.ENV_FILE }}" > .env
-          echo '${{ secrets.CLIENT_SECRETS_JSON }}' > client_secrets.json
-          echo '${{ secrets.TOKEN_JSON }}' > token.json
+          echo "$SECRET_ENV" > .env
+          echo "$SECRET_CLIENT" > client_secrets.json
+          echo "$SECRET_TOKEN" > token.json
 
       - name: Run Main Pipeline
         run: |
