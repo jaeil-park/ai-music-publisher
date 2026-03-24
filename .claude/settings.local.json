@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:platform.acedata.cloud)",
+      "WebSearch",
+      "WebFetch(domain:dev.to)"
+    ]
+  }
+}
