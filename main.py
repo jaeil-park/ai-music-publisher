@@ -37,6 +37,7 @@ DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
 
 def send_discord_notification(message: str):
     if not DISCORD_WEBHOOK_URL:
+        logger.warning("DISCORD_WEBHOOK_URL이 설정되지 않아 디스코드 알림을 건너뜁니다.")
         return
     try:
         requests.post(DISCORD_WEBHOOK_URL, json={"content": message}, timeout=10)
