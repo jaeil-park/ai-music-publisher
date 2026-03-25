@@ -102,19 +102,30 @@ class SunoCookie:
         """auth.suno.com 전용 __client 쿠키값."""
         return self._get("__client")
 
+    def get_cookie_string(self) -> str:
+        """현재 갱신된 JWT 토큰이 반영된 최신 쿠키 문자열 반환."""
+        if not self._token:
+            return self._raw
+        parts = self._raw.split(";")
+        new_parts = []
+        found = False
+        for p in parts:
+            if p.strip().startswith("__session="):
+                new_parts.append(f" __session={self._token}" if new_parts else f"__session={self._token}")
+                found = True
+            else:
+                new_parts.append(p)
+        if not found:
+            new_parts.append(f" __session={self._token}")
+        return ";".join(new_parts)
+
     def load_initial_token(self):
         """
-        초기 JWT 토큰 로드.
-        1순위: __session 쿠키 (httpOnly라 Network 탭에서만 보임)
-        2순위: __client 쿠키로 Clerk GET /v1/client 호출
+        항상 수명이 긴 __client 쿠키를 이용해 Clerk API로부터 최신 JWT 토큰을 발급받습니다.
+        (환경변수에 포함된 __session 쿠키는 수명이 매우 짧아 즉시 만료되므로 무시)
         """
-        token = self._get("__session")
-        if token:
-            self._token = token
-            logger.info("초기 JWT 토큰 로드 완료 (__session 쿠키).")
-        else:
-            logger.info("__session 쿠키 없음 → Clerk API로 토큰 발급.")
-            self.refresh_token()
+        logger.info("Clerk API를 통해 최신 JWT 토큰을 발급받습니다...")
+        self.refresh_token()
 
     def refresh_token(self):
         """
@@ -141,13 +152,19 @@ class SunoCookie:
             resp.raise_for_status()
 
         data     = resp.json()
-        sessions = data.get("response", data).get("sessions", [])
-        if not sessions:
-            raise ValueError("Clerk 응답에 sessions 없음. 쿠키 만료 의심.")
-
-        token = sessions[0].get("last_active_token", {}).get("jwt")
+        token    = None
+        
+        # Clerk API 응답 구조 변화에 대응하여 다양한 경로에서 토큰 탐색
+        if data.get("client", {}).get("sessions"):
+            token = data["client"]["sessions"][0].get("last_active_token", {}).get("jwt")
+        elif data.get("response", {}).get("last_active_token"):
+            token = data["response"]["last_active_token"].get("jwt")
+        elif data.get("response", {}).get("sessions"):
+            token = data["response"]["sessions"][0].get("last_active_token", {}).get("jwt")
+            
         if not token:
-            raise ValueError("last_active_token.jwt 없음.")
+            raise ValueError(f"Clerk 응답에서 토큰 파싱 실패 (응답 구조 확인 필요): {str(data)[:200]}")
+            
         self._token = token
         logger.info("JWT 토큰 갱신 완료 (last_active_token).")
 
@@ -339,6 +356,7 @@ def _suno_headers() -> dict:
     """매 요청마다 fresh browser-token을 포함한 인증 헤더 반환."""
     return {
         "Authorization": f"Bearer {suno_auth.get_token()}",
+        "Cookie":        suno_auth.get_cookie_string(),
         "browser-token": _make_browser_token(),
         "device-id":     suno_auth.device_id,
     }
