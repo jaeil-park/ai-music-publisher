@@ -137,14 +137,10 @@ def _generate_background(concept: dict, out_path: Path) -> Path:
     is_weekend = now_kst.weekday() >= 5
 
     # 시간대에 따른 시각적 분위기/색감(Lighting/Color palette) 영문 프롬프트 분기
-    if 5 <= hour < 12:
+    if hour < 12: # 오전 9시
         lighting = "Morning sunlight, bright and refreshing color palette, warm sunrise lighting"
-    elif 12 <= hour < 17:
-        lighting = "Clear daylight, vibrant and energetic color palette, vivid"
-    elif 17 <= hour < 22:
+    else: # 오후 6시
         lighting = "Sunset golden hour, calm and warm color palette, twilight"
-    else:
-        lighting = "Night time, dark and moody color palette, neon or moonlight, lo-fi aesthetic"
 
     # 주말일 경우 파티/신나는 시각적 요소 추가
     weekend_visual = ", energetic party vibe, festival, dynamic and vibrant" if is_weekend else ""

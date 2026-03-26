@@ -25,6 +25,8 @@ logger = logging.getLogger("main")
 from src.generator import generate_daily_concept, generate_and_download_audio
 from src.video_maker import make_video, BG_PATH
 from src.uploader import upload_to_youtube
+from src.uploader_ig import upload_to_instagram
+from src.uploader_tiktok import upload_to_tiktok
 
 # 경로 및 아카이브 설정
 BASE_DIR = Path(__file__).parent
@@ -81,8 +83,17 @@ def main():
         )
         logger.info("🎉 유튜브 업로드 성공! Video URL: https://youtu.be/%s", video_id)
 
-        # [Step 4] 임시 파일 정리 (아카이빙)
-        logger.info("[Step 4] 임시 파일 정리 및 아카이빙")
+        # [Step 4] 인스타그램 릴스 업로드
+        logger.info("[Step 4] Instagram Reels 업로드 시작")
+        ig_caption = f"{title}\n\n{description}"
+        upload_to_instagram(video_path=str(mp4_path), caption=ig_caption)
+
+        # [Step 5] 틱톡 업로드
+        logger.info("[Step 5] TikTok 업로드 시작")
+        upload_to_tiktok(video_path=str(mp4_path), title=title)
+
+        # [Step 6] 임시 파일 정리 (아카이빙)
+        logger.info("[Step 6] 임시 파일 정리 및 아카이빙")
         if mp3_path.exists():
             shutil.move(str(mp3_path), str(ARCHIVE_DIR / mp3_path.name))
         

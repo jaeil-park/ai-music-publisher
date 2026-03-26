@@ -260,14 +260,10 @@ def generate_daily_concept() -> dict:
     )
 
     # 시간대에 따른 분위기 키워드 분기
-    if 5 <= hour < 12:
+    if hour < 12:  # 오전 9시 실행
         time_of_day, time_mood = "아침", "상쾌하고 활기찬, 희망찬, 모닝 커피"
-    elif 12 <= hour < 17:
-        time_of_day, time_mood = "오후", "나른함을 깨는, 리드미컬한, 집중, 경쾌한"
-    elif 17 <= hour < 22:
+    else:  # 오후 6시 실행
         time_of_day, time_mood = "저녁", "차분하고 감성적인, 하루를 마무리하는, 칠링"
-    else:
-        time_of_day, time_mood = "밤/새벽", "몽환적인, 딥한, 수면 유도, 로파이"
 
     system_prompt = (
         "당신은 K-POP 전문 A&R 프로듀서입니다. 최신 트렌드를 반영하여 매일 다른 분위기의 히트곡 컨셉을 기획합니다.\n"
