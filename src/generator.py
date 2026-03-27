@@ -373,12 +373,13 @@ def generate_daily_concept() -> dict:
         time_of_day, time_mood = "저녁", "차분하고 감성적인, 하루를 마무리하는, 칠링"
 
     system_prompt = (
-        "당신은 K-POP 전문 A&R 프로듀서입니다. 최신 트렌드를 반영하여 매일 다른 분위기의 히트곡 컨셉을 기획합니다.\n"
+        "당신은 트렌디하고 다재다능한 글로벌 음악 프로듀서입니다. 매일 전혀 다른 장르와 분위기의 히트곡 컨셉을 기획합니다.\n"
+        "팝, R&B, 힙합, EDM, 록, 인디 등 다양한 장르를 넘나들며, 때로는(약 20% 확률로) 중독성 강한 밈(Meme) 스타일의 '트렌디한 어린이용 동요/댄스곡'도 기획합니다.\n"
         "반드시 아래 JSON 형식으로만 응답하세요. 다른 텍스트는 절대 포함하지 마세요.\n"
         "{\n"
-        '  "genre": "장르명 (영문)",\n'
+        '  "genre": "Suno API에 들어갈 장르 및 스타일 태그 (영문, 쉼표로 구분. 예: trendy pop, upbeat / catchy children song, electro / acoustic chillhop)",\n'
         '  "mood": "분위기 키워드 (한글, 3단어 이내)",\n'
-        '  "suno_prompt": "Suno AI 음악 생성 프롬프트 (영문, 60자 이내)",\n'
+        '  "lyrics": "실제 생성될 노래의 가사 (한국어 위주. 최소 15~20줄 이상, [Verse], [Chorus] 등 구조 포함하여 1분 이상 길이의 곡이 나올 수 있도록 충분한 분량으로 작성)",\n'
         '  "title": "유튜브 쇼츠용 제목 (한글, 시선을 끄는 매력적인 유튜브 감성 제목, 30자 이내)",\n'
         '  "description": "유튜브 설명란 소개 및 트렌디한 해시태그 3~5개 포함 (한글, 100자 이내)"\n'
         "}"
@@ -459,17 +460,18 @@ def generate_and_download_audio(concept: dict) -> Path:
 def _suno_headers() -> dict:
     """매 요청마다 fresh browser-token을 포함한 인증 헤더 반환."""
     return {
-        "Authorization": f"Bearer {suno_auth.get_token()}",
-        "Cookie":        suno_auth.get_cookie_string(),
-        "browser-token": _make_browser_token(),
-        "device-id":     suno_auth.device_id,
+        "Authorization": f"Bearer {suno_auth.get_token()}", # JWT 토큰
+        "browser-token": _make_browser_token(),             # 브라우저 토큰
+        "device-id":     suno_auth.device_id,               # 디바이스 ID
+        # Suno API는 Authorization 헤더로 인증하므로, Cookie 헤더는 불필요하거나 문제가 될 수 있음.
+        # Clerk 인증 시에만 __client 쿠키를 사용하고, 실제 API 호출 시에는 Authorization 헤더만으로 충분함.
     }
 
 
 @with_retry()
 def _request_suno_generation(concept: dict, session: requests.Session) -> list[str]:
     """Suno API에 음악 생성 요청 후 clip_id 목록 반환."""
-    logger.info("Suno 생성 요청 → '%s'", concept.get("suno_prompt"))
+    logger.info("Suno 생성 요청 → 장르: [%s] | 가사: '%s...'", concept.get("genre"), concept.get("lyrics", "")[:30])
 
     # 브라우저 Network 탭에서 확인한 실제 payload 구조 (v2-web 기준)
     # - mv: "chirp-crow" (실제 모델명, v4.5-all에 해당)
@@ -478,7 +480,7 @@ def _request_suno_generation(concept: dict, session: requests.Session) -> list[s
     # - v2-web 엔드포인트는 Cloudflare Turnstile token 필요 → v2/ 사용
     payload = {
         "generation_type":   "TEXT",
-        "prompt":            concept["suno_prompt"],
+        "prompt":            concept["lyrics"],
         "tags":              concept.get("genre", ""),
         "title":             concept.get("title", ""),
         "make_instrumental": False,  # 보컬 및 가사가 생성되도록 False로 변경
