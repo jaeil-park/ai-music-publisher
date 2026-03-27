@@ -5,6 +5,7 @@ generator.py
 """
 
 import os
+import re
 import sys
 import json
 import time
@@ -102,6 +103,20 @@ class SunoCookie:
         """auth.suno.com 전용 __client 쿠키값."""
         return self._get("__client")
 
+    def _update_raw_cookie(self, name: str, value: str):
+        """_raw 쿠키 문자열에서 특정 쿠키 값을 in-place 갱신."""
+        parts = self._raw.split(";")
+        new_parts, found = [], False
+        for p in parts:
+            if p.strip().startswith(f"{name}="):
+                new_parts.append(f" {name}={value}" if new_parts else f"{name}={value}")
+                found = True
+            else:
+                new_parts.append(p)
+        if not found:
+            new_parts.append(f" {name}={value}")
+        self._raw = ";".join(new_parts)
+
     def get_cookie_string(self) -> str:
         """현재 갱신된 JWT 토큰이 반영된 최신 쿠키 문자열 반환."""
         if not self._token:
@@ -121,55 +136,126 @@ class SunoCookie:
 
     def load_initial_token(self):
         """
-        항상 수명이 긴 __client 쿠키를 이용해 Clerk API로부터 최신 JWT 토큰을 발급받습니다.
-        (환경변수에 포함된 __session 쿠키는 수명이 매우 짧아 즉시 만료되므로 무시)
+        __client 쿠키로 Clerk 2-step 인증을 거쳐 fresh JWT를 발급받습니다.
+        GET last_active_token 재사용이 아닌 POST로 새 토큰을 발급받아 422 방지.
         """
         logger.info("Clerk API를 통해 최신 JWT 토큰을 발급받습니다...")
         self.refresh_token()
 
     def refresh_token(self):
         """
-        Clerk GET /v1/client → last_active_token.jwt 로 토큰 갱신.
+        Clerk 2-step 토큰 갱신:
+          1) GET /v1/client  → 활성 session_id 획득
+          2) POST /v1/client/sessions/{id}/tokens → 매번 새 JWT 발급
 
-        Network 탭 분석으로 확인:
-        - last_active_token.jwt 는 kid="suno-api-rs256-key-1", aud="suno-api" 포함
-        - __client 쿠키만 auth.suno.com에 전송 (도메인 격리)
-        - __session 쿠키는 약 1시간마다 만료되므로 갱신 필요
+        GET의 last_active_token은 이전에 발급된 토큰을 재사용하므로
+        Suno 서버가 "Token validation failed"(422)로 거부하는 경우가 있음.
+        POST 엔드포인트는 호출 시점에 새 JWT를 발급하므로 이 문제를 해결.
         """
         client = self.client_cookie
         if not client:
             raise ValueError("__client 쿠키가 없습니다. SUNO_COOKIE를 브라우저에서 갱신하세요.")
 
-        url  = f"https://auth.suno.com/v1/client?_clerk_js_version={CLERK_JS_VERSION}"
-        resp = requests.get(
-            url=url,
-            headers={**_SUNO_HEADERS, "Cookie": f"__client={client}"},
+        auth_headers = {**_SUNO_HEADERS, "Cookie": f"__client={client}"}
+        qs           = f"_clerk_js_version={CLERK_JS_VERSION}"
+
+        # Step 1: 활성 session_id 획득
+        r1 = requests.get(
+            f"https://auth.suno.com/v1/client?{qs}",
+            headers=auth_headers,
             impersonate=REQUESTS_IMPERSONATE,
             timeout=15,
         )
-        if not resp.ok:
-            logger.error("Clerk 토큰 갱신 실패 %d: %s", resp.status_code, resp.text[:300])
-            resp.raise_for_status()
+        if not r1.ok:
+            logger.error("Clerk GET /v1/client 실패 %d: %s", r1.status_code, r1.text[:300])
+            r1.raise_for_status()
 
-        data     = resp.json()
-        token    = None
-        
-        # Clerk API 응답 구조 변화에 대응하여 다양한 경로에서 토큰 탐색
-        if data.get("client", {}).get("sessions"):
-            token = data["client"]["sessions"][0].get("last_active_token", {}).get("jwt")
-        elif data.get("response", {}).get("last_active_token"):
-            token = data["response"]["last_active_token"].get("jwt")
-        elif data.get("response", {}).get("sessions"):
-            token = data["response"]["sessions"][0].get("last_active_token", {}).get("jwt")
-            
+        # Clerk가 Set-Cookie로 새 __client를 발급하면 즉시 갱신 (세션 연장)
+        m = re.search(r'__client=([^;,\s]+)', r1.headers.get("set-cookie", ""))
+        if m:
+            self._update_raw_cookie("__client", m.group(1))
+            logger.info("__client 쿠키 자동 갱신됨 (Clerk Set-Cookie).")
+
+        data     = r1.json()
+        sessions = (
+            data.get("client", {}).get("sessions") or
+            data.get("response", {}).get("sessions") or
+            []
+        )
+        if not sessions:
+            raise ValueError(
+                f"활성 Clerk 세션 없음. Suno 로그인 상태인지 확인하세요. 응답: {str(data)[:200]}"
+            )
+
+        session_status = sessions[0].get("status", "unknown")
+        session_id     = sessions[0]["id"]
+        logger.debug("활성 세션 ID: %s | 상태: %s", session_id, session_status)
+
+        if session_status != "active":
+            raise ValueError(
+                f"Clerk 세션이 만료되었습니다 (status={session_status}). "
+                "브라우저에서 suno.com에 재로그인 후 SUNO_COOKIE를 .env에 새로 붙여넣으세요."
+            )
+
+        # Step 2: 새 JWT 발급 (POST → fresh token)
+        r2 = requests.post(
+            f"https://auth.suno.com/v1/client/sessions/{session_id}/tokens?{qs}",
+            headers={**auth_headers, "Content-Length": "0"},
+            impersonate=REQUESTS_IMPERSONATE,
+            timeout=15,
+        )
+        if r2.ok:
+            token = r2.json().get("jwt")
+        else:
+            logger.warning("POST 토큰 발급 실패(%d), last_active_token 폴백...", r2.status_code)
+            token = sessions[0].get("last_active_token", {}).get("jwt")
+
         if not token:
-            raise ValueError(f"Clerk 응답에서 토큰 파싱 실패 (응답 구조 확인 필요): {str(data)[:200]}")
-            
+            raise ValueError(f"JWT 파싱 실패. 응답: {str(r2.text)[:200]}")
+
         self._token = token
-        logger.info("JWT 토큰 갱신 완료 (last_active_token).")
+
+        # JWT payload 디코딩 (서명 검증 없음) → 만료·audience 즉시 확인
+        try:
+            padded = token.split(".")[1] + "=="
+            payload = json.loads(base64.b64decode(padded).decode())
+            exp     = payload.get("exp", 0)
+            aud     = payload.get("aud", "?")
+            exp_str = datetime.datetime.fromtimestamp(exp).strftime("%Y-%m-%d %H:%M:%S") if exp else "?"
+            logger.info("JWT 갱신 완료 | aud=%s | 만료=%s", aud, exp_str)
+            if exp and exp < time.time():
+                logger.warning(
+                    "⚠️  발급된 JWT가 이미 만료되어 있습니다! "
+                    "브라우저에서 Suno에 로그인 후 SUNO_COOKIE를 새로 복사하세요."
+                )
+        except Exception:
+            logger.info("JWT 토큰 갱신 완료 (payload 파싱 불가).")
 
     def get_token(self) -> str | None:
         return self._token
+
+
+def save_updated_cookie_to_env():
+    """
+    갱신된 SUNO_COOKIE를 .env 파일에 반영.
+    GitHub Actions 워크플로우 종료 직전에 호출하면
+    'gh secret set ENV_FILE < .env' 로 시크릿을 자동 업데이트할 수 있음.
+    """
+    env_path   = Path(__file__).parent.parent / ".env"
+    new_cookie = suno_auth.get_cookie_string()
+    if not new_cookie:
+        return
+
+    if env_path.exists():
+        text = env_path.read_text(encoding="utf-8")
+        if re.search(r"^SUNO_COOKIE=", text, re.MULTILINE):
+            text = re.sub(r"^SUNO_COOKIE=.*$", f"SUNO_COOKIE={new_cookie}", text, flags=re.MULTILINE)
+        else:
+            text += f"\nSUNO_COOKIE={new_cookie}\n"
+        env_path.write_text(text, encoding="utf-8")
+        logger.info("갱신된 SUNO_COOKIE를 .env에 저장했습니다.")
+    else:
+        logger.warning(".env 파일을 찾을 수 없어 쿠키를 저장하지 못했습니다.")
 
 
 def _make_browser_token() -> str:
@@ -206,7 +292,10 @@ suno_auth = SunoCookie(_COOKIE_STR or "")
 # 공통 재시도 데코레이터
 # ---------------------------------------------------------------------------
 def with_retry(max_retries: int = MAX_RETRIES, delay: int = RETRY_DELAY):
-    """외부 API 호출 함수에 최대 max_retries회 재시도 로직을 부여하는 데코레이터."""
+    """
+    외부 API 호출 함수에 재시도 로직을 부여하는 데코레이터.
+    토큰 인증(422) 실패 시 즉시 토큰 갱신 후 재시도하는 로직 포함.
+    """
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -214,6 +303,24 @@ def with_retry(max_retries: int = MAX_RETRIES, delay: int = RETRY_DELAY):
                 try:
                     return func(*args, **kwargs)
                 except Exception as e:
+                    # Suno API의 'Token validation failed' (422) 에러에 대한 특수 처리
+                    if isinstance(e, requests.exceptions.HTTPError) and e.response.status_code == 422 and attempt < max_retries:
+                        try:
+                            if "token validation failed" in e.response.json().get("detail", "").lower():
+                                logger.warning(
+                                    "[%s] 토큰 인증 실패(422). 즉시 토큰을 갱신하고 재시도합니다. (시도 %d/%d)",
+                                    func.__name__, attempt, max_retries
+                                )
+                                suno_auth.refresh_token()
+                                continue  # 딜레이 없이 바로 다음 시도
+                        except (json.JSONDecodeError, AttributeError):
+                            # JSON 파싱 실패 등은 일반 에러로 간주하고 아래에서 처리
+                            pass
+                        except Exception as refresh_e:
+                            logger.critical("토큰 갱신 중 치명적 오류 발생: %s", refresh_e)
+                            raise refresh_e # 토큰 갱신 실패는 즉시 중단
+
+                    # 그 외 모든 예외 또는 마지막 시도
                     logger.error("[%s] 시도 %d/%d 실패: %s", func.__name__, attempt, max_retries, e)
                     if attempt < max_retries:
                         logger.info("%d초 후 재시도합니다...", delay)
