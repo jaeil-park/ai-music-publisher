@@ -49,6 +49,7 @@ _COOKIE_STR    = os.getenv("SUNO_COOKIE")
 
 SUNO_BASE_URL        = os.getenv("SUNO_BASE_URL", "https://studio-api-prod.suno.com/api")
 CLERK_JS_VERSION     = "5.117.0"
+CLERK_API_VERSION    = "2025-11-10"
 REQUESTS_IMPERSONATE = "chrome110"
 
 # ---------------------------------------------------------------------------
@@ -157,7 +158,7 @@ class SunoCookie:
             raise ValueError("__client 쿠키가 없습니다. SUNO_COOKIE를 브라우저에서 갱신하세요.")
 
         auth_headers = {**_SUNO_HEADERS, "Cookie": f"__client={client}"}
-        qs           = f"_clerk_js_version={CLERK_JS_VERSION}"
+        qs           = f"__clerk_api_version={CLERK_API_VERSION}&_clerk_js_version={CLERK_JS_VERSION}"
 
         # Step 1: 활성 session_id 획득
         r1 = requests.get(
@@ -459,13 +460,17 @@ def generate_and_download_audio(concept: dict) -> Path:
 # 내부 헬퍼 함수들
 # ---------------------------------------------------------------------------
 def _suno_headers() -> dict:
-    """매 요청마다 fresh browser-token을 포함한 인증 헤더 반환."""
+    """매 요청마다 fresh browser-token을 포함한 인증 헤더 반환.
+
+    Suno 스튜디오 API는 Authorization Bearer 토큰과 __session 쿠키를 동시에 검증.
+    둘 중 하나라도 누락되거나 불일치하면 422 Token validation failed 반환.
+    """
+    token = suno_auth.get_token()
     return {
-        "Authorization": f"Bearer {suno_auth.get_token()}", # JWT 토큰
-        "browser-token": _make_browser_token(),             # 브라우저 토큰
-        "device-id":     suno_auth.device_id,               # 디바이스 ID
-        # Suno API는 Authorization 헤더로 인증하므로, Cookie 헤더는 불필요하거나 문제가 될 수 있음.
-        # Clerk 인증 시에만 __client 쿠키를 사용하고, 실제 API 호출 시에는 Authorization 헤더만으로 충분함.
+        "Authorization": f"Bearer {token}",
+        "Cookie":        f"__session={token}",
+        "browser-token": _make_browser_token(),
+        "device-id":     suno_auth.device_id,
     }
 
 
