@@ -470,6 +470,9 @@ def generate_and_download_audio(concept: dict) -> Path:
     with requests.Session(impersonate=REQUESTS_IMPERSONATE) as session:
         session.headers.update(_SUNO_HEADERS)
 
+        # 브라우저는 generate 전에 /api/c/check를 호출해 session-id를 받아 사용.
+        _pre_check(session)
+
         clip_ids  = _request_suno_generation(concept, session)
         audio_url, lyrics = _poll_until_complete(clip_ids[0], session)
         concept["lyrics"] = lyrics
@@ -485,18 +488,41 @@ def generate_and_download_audio(concept: dict) -> Path:
 def _suno_headers() -> dict:
     """매 요청마다 fresh browser-token을 포함한 인증 헤더 반환.
 
-    브라우저는 studio-api-prod.suno.com에 __session 외에도
-    __client_uat, ajs_anonymous_id 등 다수의 쿠키를 함께 전송.
-    __session=<jwt> 하나만 보내면 서버사이드 세션 검증 실패(422) 가능.
-    → get_cookie_string()으로 전체 쿠키 문자열을 전송 (현재 JWT로 __session 교체됨).
+    브라우저 네트워크 캡처(2026-03-29) 결과:
+    - studio-api-prod.suno.com으로의 요청에 Cookie 헤더 없음.
+      (브라우저는 credentials: omit으로 CORS 요청 → 쿠키 미전송)
+    - Authorization: Bearer + browser-token + device-id 만 전송.
     """
     token = suno_auth.get_token()
     return {
         "Authorization": f"Bearer {token}",
-        "Cookie":        suno_auth.get_cookie_string(),
         "browser-token": _make_browser_token(),
         "device-id":     suno_auth.device_id,
     }
+
+
+def _pre_check(session: requests.Session) -> None:
+    """
+    브라우저가 generate 전에 항상 호출하는 /api/c/check 엔드포인트.
+    응답 헤더의 session-id를 이후 모든 API 요청에 포함시켜야 함.
+    (access-control-expose-headers: session-id → JS가 읽어 사용)
+    """
+    try:
+        resp = session.post(
+            f"{SUNO_BASE_URL}/c/check",
+            json={},
+            headers=_suno_headers(),
+            timeout=10,
+            impersonate=REQUESTS_IMPERSONATE,
+        )
+        sid = resp.headers.get("session-id", "")
+        if sid:
+            session.headers["session-id"] = sid
+            logger.info("사전 체크 완료 | session-id: %s", sid[:16] + "...")
+        else:
+            logger.debug("사전 체크 완료 (session-id 없음). 응답: %s", resp.text[:100])
+    except Exception as e:
+        logger.warning("사전 체크(/api/c/check) 실패: %s (무시하고 계속)", e)
 
 
 @with_retry()
