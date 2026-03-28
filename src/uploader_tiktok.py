@@ -150,7 +150,7 @@ def _auth_headers() -> dict:
 # Step 1: 게시 초기화 (FILE_UPLOAD) → publish_id + upload_url 반환
 # ---------------------------------------------------------------------------
 @with_retry()
-def _init_file_upload(video_path: str, title: str) -> tuple[str, str]:
+def _init_file_upload(video_path: str, title: str) -> tuple[str, str, int]:
     """
     FILE_UPLOAD 방식으로 게시를 초기화.
     도메인 인증 없이 영상을 TikTok 서버에 직접 업로드.
@@ -158,8 +158,17 @@ def _init_file_upload(video_path: str, title: str) -> tuple[str, str]:
     Returns:
         (publish_id, upload_url)
     """
-    video_size        = os.path.getsize(video_path)
-    total_chunk_count = math.ceil(video_size / CHUNK_SIZE)
+    video_size = os.path.getsize(video_path)
+
+    # TikTok rejects multi-chunk uploads for small files.
+    # Use a single chunk whenever the file fits within 64 MB.
+    MAX_SINGLE_CHUNK = 64 * 1024 * 1024
+    if video_size <= MAX_SINGLE_CHUNK:
+        chunk_size        = video_size
+        total_chunk_count = 1
+    else:
+        chunk_size        = CHUNK_SIZE
+        total_chunk_count = math.ceil(video_size / chunk_size)
 
     url     = f"{TIKTOK_API_BASE}/post/publish/video/init/"
     headers = _auth_headers()
@@ -175,7 +184,7 @@ def _init_file_upload(video_path: str, title: str) -> tuple[str, str]:
         "source_info": {
             "source":             "FILE_UPLOAD",
             "video_size":         video_size,
-            "chunk_size":         CHUNK_SIZE,
+            "chunk_size":         chunk_size,
             "total_chunk_count":  total_chunk_count,
         },
     }
@@ -203,20 +212,20 @@ def _init_file_upload(video_path: str, title: str) -> tuple[str, str]:
     publish_id = data["data"]["publish_id"]
     upload_url = data["data"]["upload_url"]
     logger.info("업로드 초기화 완료. publish_id: %s", publish_id)
-    return publish_id, upload_url
+    return publish_id, upload_url, chunk_size
 
 # ---------------------------------------------------------------------------
 # Step 2: 영상 청크 업로드
 # ---------------------------------------------------------------------------
-def _upload_chunks(video_path: str, upload_url: str):
-    """영상을 CHUNK_SIZE 단위로 분할하여 TikTok 서버에 업로드."""
+def _upload_chunks(video_path: str, upload_url: str, chunk_size: int):
+    """영상을 chunk_size 단위로 분할하여 TikTok 서버에 업로드."""
     video_size = os.path.getsize(video_path)
-    total_chunks = math.ceil(video_size / CHUNK_SIZE)
+    total_chunks = math.ceil(video_size / chunk_size)
 
     with open(video_path, "rb") as f:
         for chunk_idx in range(total_chunks):
-            start = chunk_idx * CHUNK_SIZE
-            chunk = f.read(CHUNK_SIZE)
+            start = chunk_idx * chunk_size
+            chunk = f.read(chunk_size)
             end   = start + len(chunk) - 1
 
             headers = {
@@ -285,11 +294,11 @@ def upload_to_tiktok(video_path: str, title: str) -> str:
 
     # Step 1: 게시 초기화
     logger.info("[TT Step 1] TikTok 업로드 초기화 중...")
-    publish_id, upload_url = _init_file_upload(video_path, title)
+    publish_id, upload_url, chunk_size = _init_file_upload(video_path, title)
 
     # Step 2: 청크 업로드
     logger.info("[TT Step 2] 영상 청크 업로드 중...")
-    _upload_chunks(video_path, upload_url)
+    _upload_chunks(video_path, upload_url, chunk_size)
 
     # Step 3: 게시 완료 대기
     logger.info("[TT Step 3] TikTok 게시 완료 대기 중...")
