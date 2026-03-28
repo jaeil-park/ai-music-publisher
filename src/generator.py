@@ -511,6 +511,7 @@ def generate_daily_concept() -> dict:
     )
 
     concept = json.loads(response.choices[0].message.content)
+    concept["category_id"] = concept_choice["id"]
     logger.info("컨셉 기획 완료 → 장르: [%s] | 분위기: %s", concept.get("genre"), concept.get("mood"))
     return concept
 
