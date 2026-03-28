@@ -495,13 +495,15 @@ def generate_and_download_audio(concept: dict) -> Path:
 def _suno_headers() -> dict:
     """매 요청마다 fresh browser-token을 포함한 인증 헤더 반환.
 
-    Suno 스튜디오 API는 Authorization Bearer 토큰과 __session 쿠키를 동시에 검증.
-    둘 중 하나라도 누락되거나 불일치하면 422 Token validation failed 반환.
+    브라우저는 studio-api-prod.suno.com에 __session 외에도
+    __client_uat, ajs_anonymous_id 등 다수의 쿠키를 함께 전송.
+    __session=<jwt> 하나만 보내면 서버사이드 세션 검증 실패(422) 가능.
+    → get_cookie_string()으로 전체 쿠키 문자열을 전송 (현재 JWT로 __session 교체됨).
     """
     token = suno_auth.get_token()
     return {
         "Authorization": f"Bearer {token}",
-        "Cookie":        f"__session={token}",
+        "Cookie":        suno_auth.get_cookie_string(),
         "browser-token": _make_browser_token(),
         "device-id":     suno_auth.device_id,
     }
