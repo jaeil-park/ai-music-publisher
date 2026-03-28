@@ -49,6 +49,9 @@ TIKTOK_REFRESH_TOKEN = os.getenv("TIKTOK_REFRESH_TOKEN")
 TIKTOK_CLIENT_KEY    = os.getenv("TIKTOK_CLIENT_KEY")
 TIKTOK_CLIENT_SECRET = os.getenv("TIKTOK_CLIENT_SECRET")
 
+# SELF_ONLY (unaudited/sandbox) or PUBLIC_TO_EVERYONE (after app review)
+TIKTOK_PRIVACY_LEVEL = os.getenv("TIKTOK_PRIVACY_LEVEL", "SELF_ONLY")
+
 TIKTOK_API_BASE = "https://open.tiktokapis.com/v2"
 TOKEN_URL       = f"{TIKTOK_API_BASE}/oauth/token/"
 ENV_PATH        = BASE_DIR / ".env"
@@ -175,7 +178,7 @@ def _init_file_upload(video_path: str, title: str) -> tuple[str, str, int]:
     payload = {
         "post_info": {
             "title":                    title[:2200],
-            "privacy_level":            "PUBLIC_TO_EVERYONE",
+            "privacy_level":            TIKTOK_PRIVACY_LEVEL,
             "disable_duet":             False,
             "disable_comment":          False,
             "disable_stitch":           False,
