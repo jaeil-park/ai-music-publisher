@@ -137,21 +137,38 @@ class SunoCookie:
 
     def load_initial_token(self):
         """
-        __client 쿠키로 Clerk 2-step 인증을 거쳐 fresh JWT를 발급받습니다.
-        GET last_active_token 재사용이 아닌 POST로 새 토큰을 발급받아 422 방지.
+        초기 토큰 로드 전략:
+          1) 쿠키의 __session JWT가 유효(만료까지 60초 이상)하면 Clerk API 호출 없이 직접 사용.
+             → 브라우저에서 복사한 JWT는 kid=suno-api-rs256-key-1(Suno 전용 서명키)를 사용하므로
+               POST /tokens가 반환하는 기본 Clerk JWT와 형식이 다를 수 있음. 쿠키를 직접 쓰면 안전.
+          2) 만료됐으면 refresh_token()으로 Clerk API 호출.
         """
-        logger.info("Clerk API를 통해 최신 JWT 토큰을 발급받습니다...")
+        session_token = self._get("__session")
+        if session_token:
+            try:
+                padded  = session_token.split(".")[1] + "=="
+                payload = json.loads(base64.b64decode(padded).decode())
+                exp     = payload.get("exp", 0)
+                if exp > time.time() + 60:
+                    self._token = session_token
+                    exp_str = datetime.datetime.fromtimestamp(exp).strftime("%Y-%m-%d %H:%M:%S")
+                    logger.info("쿠키 __session 직접 사용 | aud=%s | 만료=%s", payload.get("aud"), exp_str)
+                    return
+                logger.info("쿠키 __session 만료됨. Clerk API로 갱신합니다...")
+            except Exception:
+                logger.warning("쿠키 __session 파싱 실패. Clerk API로 갱신합니다...")
+        else:
+            logger.info("쿠키에 __session 없음. Clerk API로 발급합니다...")
+
         self.refresh_token()
 
     def refresh_token(self):
         """
-        Clerk 2-step 토큰 갱신:
-          1) GET /v1/client  → 활성 session_id 획득
-          2) POST /v1/client/sessions/{id}/tokens → 매번 새 JWT 발급
-
-        GET의 last_active_token은 이전에 발급된 토큰을 재사용하므로
-        Suno 서버가 "Token validation failed"(422)로 거부하는 경우가 있음.
-        POST 엔드포인트는 호출 시점에 새 JWT를 발급하므로 이 문제를 해결.
+        Clerk 토큰 갱신 전략:
+          1) GET /v1/client  → session_id 및 last_active_token 획득
+          2) last_active_token이 유효(만료까지 60초 이상)하면 그대로 사용.
+             → last_active_token은 브라우저 __session과 동일한 kid/형식을 가진 Suno 전용 JWT.
+          3) last_active_token도 만료됐으면 POST /tokens로 새 JWT 발급 (최후 수단).
         """
         client = self.client_cookie
         if not client:
@@ -160,7 +177,7 @@ class SunoCookie:
         auth_headers = {**_SUNO_HEADERS, "Cookie": f"__client={client}"}
         qs           = f"__clerk_api_version={CLERK_API_VERSION}&_clerk_js_version={CLERK_JS_VERSION}"
 
-        # Step 1: 활성 session_id 획득
+        # Step 1: 활성 session_id 및 last_active_token 획득
         r1 = requests.get(
             f"https://auth.suno.com/v1/client?{qs}",
             headers=auth_headers,
@@ -198,32 +215,48 @@ class SunoCookie:
                 "브라우저에서 suno.com에 재로그인 후 SUNO_COOKIE를 .env에 새로 붙여넣으세요."
             )
 
-        # Step 2: 새 JWT 발급 (POST → fresh token)
-        r2 = requests.post(
-            f"https://auth.suno.com/v1/client/sessions/{session_id}/tokens?{qs}",
-            headers={**auth_headers, "Content-Length": "0"},
-            impersonate=REQUESTS_IMPERSONATE,
-            timeout=15,
-        )
-        if r2.ok:
-            token = r2.json().get("jwt")
-        else:
-            logger.warning("POST 토큰 발급 실패(%d), last_active_token 폴백...", r2.status_code)
-            token = sessions[0].get("last_active_token", {}).get("jwt")
+        # Step 2: last_active_token 우선 사용 (Suno 전용 JWT 형식 보장)
+        token = None
+        last_jwt = sessions[0].get("last_active_token", {}).get("jwt")
+        if last_jwt:
+            try:
+                padded      = last_jwt.split(".")[1] + "=="
+                lat_payload = json.loads(base64.b64decode(padded).decode())
+                if lat_payload.get("exp", 0) > time.time() + 60:
+                    token = last_jwt
+                    logger.info("last_active_token 사용 (Suno 전용 JWT 형식).")
+                else:
+                    logger.info("last_active_token 만료됨. POST /tokens로 신규 발급합니다...")
+            except Exception:
+                logger.warning("last_active_token 파싱 실패. POST /tokens로 신규 발급합니다...")
 
+        # Step 3: last_active_token 만료 시 POST /tokens로 신규 발급 (최후 수단)
         if not token:
-            raise ValueError(f"JWT 파싱 실패. 응답: {str(r2.text)[:200]}")
+            r2 = requests.post(
+                f"https://auth.suno.com/v1/client/sessions/{session_id}/tokens?{qs}",
+                headers={**auth_headers, "Content-Length": "0"},
+                impersonate=REQUESTS_IMPERSONATE,
+                timeout=15,
+            )
+            if r2.ok:
+                token = r2.json().get("jwt")
+            if not token:
+                raise ValueError(f"JWT 발급 실패. POST /tokens 응답: {str(r2.text)[:200]}")
 
         self._token = token
 
-        # JWT payload 디코딩 (서명 검증 없음) → 만료·audience 즉시 확인
+        # JWT payload 디코딩 (서명 검증 없음) → 만료·audience·kid 즉시 확인
         try:
-            padded = token.split(".")[1] + "=="
+            header  = json.loads(base64.b64decode(token.split(".")[0] + "==").decode())
+            padded  = token.split(".")[1] + "=="
             payload = json.loads(base64.b64decode(padded).decode())
             exp     = payload.get("exp", 0)
             aud     = payload.get("aud", "?")
+            kid     = header.get("kid", "?")
             exp_str = datetime.datetime.fromtimestamp(exp).strftime("%Y-%m-%d %H:%M:%S") if exp else "?"
-            logger.info("JWT 갱신 완료 | aud=%s | 만료=%s", aud, exp_str)
+            logger.info("JWT 갱신 완료 | aud=%s | kid=%s | 만료=%s", aud, kid, exp_str)
+            if kid != "suno-api-rs256-key-1":
+                logger.warning("⚠️  예상치 못한 JWT kid=%s. Suno가 이 토큰을 거부할 수 있습니다.", kid)
             if exp and exp < time.time():
                 logger.warning(
                     "⚠️  발급된 JWT가 이미 만료되어 있습니다! "
