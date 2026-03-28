@@ -7,14 +7,12 @@ scripts/tiktok_auth.py
 
 사전 준비:
     1. TikTok for Developers (https://developers.tiktok.com) 앱 생성
-    2. Products → Content Posting API 활성화
-    3. App 설정에서 Redirect URI 등록: http://localhost:8080/callback
+    2. Products -> Content Posting API 활성화
+    3. Login Kit -> Desktop 탭에 Redirect URI 등록: http://localhost:8080/callback
     4. .env에 TIKTOK_CLIENT_KEY, TIKTOK_CLIENT_SECRET 설정
 
 발급 후:
     .env에 TIKTOK_ACCESS_TOKEN, TIKTOK_REFRESH_TOKEN이 자동으로 저장됩니다.
-    access_token은 24시간, refresh_token은 365일 유효합니다.
-    이후 매일 실행 시 uploader_tiktok.py가 refresh_token으로 자동 갱신합니다.
 """
 
 import os
@@ -27,11 +25,15 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
+# Windows console UTF-8 fix
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 import requests
 from dotenv import load_dotenv, set_key
 
 # ---------------------------------------------------------------------------
-# 설정
+# Config
 # ---------------------------------------------------------------------------
 BASE_DIR    = Path(__file__).parent.parent
 ENV_PATH    = BASE_DIR / ".env"
@@ -47,7 +49,7 @@ AUTH_URL      = "https://www.tiktok.com/v2/auth/authorize/"
 TOKEN_URL     = "https://open.tiktokapis.com/v2/oauth/token/"
 
 # ---------------------------------------------------------------------------
-# 로컬 콜백 서버 (브라우저 리다이렉트 수신)
+# Local callback server
 # ---------------------------------------------------------------------------
 _received_code  = None
 _received_state = None
@@ -56,14 +58,14 @@ class _CallbackHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         global _received_code, _received_state
 
-        parsed   = urllib.parse.urlparse(self.path)
-        params   = urllib.parse.parse_qs(parsed.query)
-        error    = params.get("error", [None])[0]
+        parsed = urllib.parse.urlparse(self.path)
+        params = urllib.parse.parse_qs(parsed.query)
+        error  = params.get("error", [None])[0]
 
         if error:
             self.send_response(400)
             self.end_headers()
-            self.wfile.write(f"인증 거부됨: {error}".encode())
+            self.wfile.write(f"Auth denied: {error}".encode())
             return
 
         _received_code  = params.get("code",  [None])[0]
@@ -72,59 +74,60 @@ class _CallbackHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.end_headers()
         self.wfile.write(
-            "<html><body><h2>TikTok 인증 완료!</h2>"
-            "<p>이 창을 닫고 터미널로 돌아가세요.</p></body></html>"
-            .encode("utf-8")
+            b"<html><body><h2>TikTok auth complete!</h2>"
+            b"<p>Close this tab and return to the terminal.</p></body></html>"
         )
 
     def log_message(self, format, *args):
-        pass  # 콘솔 로그 억제
+        pass
 
 
 def _wait_for_callback() -> str:
-    """로컬 HTTP 서버를 띄우고 콜백 code를 받을 때까지 대기."""
     server = HTTPServer(("localhost", 8080), _CallbackHandler)
-    server.handle_request()  # 요청 1개만 처리 후 종료
+    server.handle_request()
     if not _received_code:
-        raise RuntimeError("인증 코드를 받지 못했습니다.")
+        raise RuntimeError("No auth code received.")
     return _received_code
 
 # ---------------------------------------------------------------------------
-# Step 1: 인증 URL 생성 및 브라우저 오픈
+# PKCE  (RFC 7636 S256)
 # ---------------------------------------------------------------------------
 def _make_pkce_pair() -> tuple[str, str]:
-    """PKCE code_verifier와 code_challenge 생성 (S256 방식)."""
-    code_verifier  = base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode()
-    code_challenge = base64.urlsafe_b64encode(
-        hashlib.sha256(code_verifier.encode()).digest()
-    ).rstrip(b"=").decode()
+    """
+    TikTok-specific PKCE (non-standard):
+      code_verifier : random string [A-Za-z0-9-._~], 64 chars
+      code_challenge: SHA256(code_verifier).hexdigest()  <-- hex, NOT base64url
+    Ref: https://developers.tiktok.com/doc/login-kit-desktop
+    """
+    alphabet      = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
+    code_verifier = "".join(secrets.choice(alphabet) for _ in range(64))
+    code_challenge = hashlib.sha256(code_verifier.encode("ascii")).hexdigest()
     return code_verifier, code_challenge
 
 
 def _build_auth_url(state: str, code_challenge: str) -> str:
     params = {
-        "client_key":             CLIENT_KEY,
-        "response_type":          "code",
-        "scope":                  SCOPES,
-        "redirect_uri":           REDIRECT_URI,
-        "state":                  state,
-        "code_challenge":         code_challenge,
-        "code_challenge_method":  "S256",
+        "client_key":            CLIENT_KEY,
+        "response_type":         "code",
+        "scope":                 SCOPES,
+        "redirect_uri":          REDIRECT_URI,
+        "state":                 state,
+        "code_challenge":        code_challenge,
+        "code_challenge_method": "S256",
     }
     return AUTH_URL + "?" + urllib.parse.urlencode(params)
 
 # ---------------------------------------------------------------------------
-# Step 2: code → access_token 교환
+# Token exchange
 # ---------------------------------------------------------------------------
 def _exchange_code_for_token(code: str, code_verifier: str) -> dict:
-    """인증 코드를 액세스 토큰으로 교환."""
     payload = {
-        "client_key":     CLIENT_KEY,
-        "client_secret":  CLIENT_SECRET,
-        "code":           code,
-        "grant_type":     "authorization_code",
-        "redirect_uri":   REDIRECT_URI,
-        "code_verifier":  code_verifier,
+        "client_key":    CLIENT_KEY,
+        "client_secret": CLIENT_SECRET,
+        "code":          code,
+        "grant_type":    "authorization_code",
+        "redirect_uri":  REDIRECT_URI,
+        "code_verifier": code_verifier,
     }
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
 
@@ -134,65 +137,59 @@ def _exchange_code_for_token(code: str, code_verifier: str) -> dict:
     data  = resp.json()
     error = data.get("error")
     if error:
-        raise RuntimeError(f"토큰 교환 실패: {data.get('error_description', error)}")
+        raise RuntimeError(f"Token exchange failed: {data.get('error_description', error)}")
 
     return data
 
 # ---------------------------------------------------------------------------
-# Step 3: .env에 토큰 저장
+# Save tokens to .env
 # ---------------------------------------------------------------------------
 def _save_tokens(token_data: dict):
-    """발급된 토큰을 .env에 저장."""
-    access_token      = token_data["access_token"]
-    refresh_token     = token_data["refresh_token"]
-    expires_in        = token_data.get("expires_in", 86400)
-    refresh_expires   = token_data.get("refresh_expires_in", 31536000)
-    open_id           = token_data.get("open_id", "")
+    access_token    = token_data["access_token"]
+    refresh_token   = token_data["refresh_token"]
+    expires_in      = token_data.get("expires_in", 86400)
+    refresh_expires = token_data.get("refresh_expires_in", 31536000)
+    open_id         = token_data.get("open_id", "")
 
     set_key(str(ENV_PATH), "TIKTOK_ACCESS_TOKEN",  access_token)
     set_key(str(ENV_PATH), "TIKTOK_REFRESH_TOKEN", refresh_token)
     set_key(str(ENV_PATH), "TIKTOK_OPEN_ID",       open_id)
 
-    print(f"\n✅ 토큰 발급 성공!")
-    print(f"   access_token  유효기간: {expires_in // 3600}시간")
-    print(f"   refresh_token 유효기간: {refresh_expires // 86400}일")
-    print(f"   open_id: {open_id}")
-    print(f"\n.env에 저장 완료: {ENV_PATH}")
-    print("\n다음 단계:")
-    print("  1. .env의 TIKTOK_ACCESS_TOKEN, TIKTOK_REFRESH_TOKEN을")
-    print("     GitHub Actions의 ENV_FILE 시크릿에 반영하세요.")
+    print(f"\n[OK] Token issued!")
+    print(f"     access_token  expires: {expires_in // 3600}h")
+    print(f"     refresh_token expires: {refresh_expires // 86400}d")
+    print(f"     open_id: {open_id}")
+    print(f"\nSaved to: {ENV_PATH}")
+    print("\nNext: update GitHub Actions ENV_FILE secret with the new tokens.")
 
 # ---------------------------------------------------------------------------
-# 메인
+# Main
 # ---------------------------------------------------------------------------
 def main():
     if not CLIENT_KEY or not CLIENT_SECRET:
-        print("[오류] .env에 TIKTOK_CLIENT_KEY, TIKTOK_CLIENT_SECRET이 설정되지 않았습니다.")
-        print("  TikTok for Developers 앱에서 Client Key와 Client Secret을 확인하세요.")
+        print("[ERROR] TIKTOK_CLIENT_KEY or TIKTOK_CLIENT_SECRET not set in .env")
         sys.exit(1)
 
-    state                    = secrets.token_urlsafe(16)
+    state                         = secrets.token_urlsafe(16)
     code_verifier, code_challenge = _make_pkce_pair()
-    auth_url                 = _build_auth_url(state, code_challenge)
+
+    auth_url = _build_auth_url(state, code_challenge)
 
     print("=" * 60)
-    print("TikTok OAuth 2.0 토큰 발급")
+    print("TikTok OAuth 2.0 Token Issuance")
     print("=" * 60)
-    print(f"\n브라우저에서 아래 URL로 인증을 진행해 주세요:")
-    print(f"\n  {auth_url}\n")
-    print("(자동으로 브라우저가 열리지 않으면 위 URL을 복사해서 직접 여세요)")
-    print("\n로컬 콜백 서버 대기 중 (http://localhost:8080)...")
+    print(f"\nOpening browser for auth...\n")
+    print(f"  {auth_url}\n")
+    print("Waiting for callback on http://localhost:8080 ...")
 
     webbrowser.open(auth_url)
 
-    # 콜백 대기
     code = _wait_for_callback()
 
-    # state 검증
     if _received_state != state:
-        raise RuntimeError("state 값 불일치 — CSRF 가능성. 다시 시도해 주세요.")
+        raise RuntimeError("state mismatch — possible CSRF. Try again.")
 
-    print(f"\n인증 코드 수신 완료. 토큰 교환 중...")
+    print("\nAuth code received. Exchanging for token...")
     token_data = _exchange_code_for_token(code, code_verifier)
     _save_tokens(token_data)
 
