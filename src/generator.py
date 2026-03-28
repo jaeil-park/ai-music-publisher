@@ -443,13 +443,14 @@ def generate_and_download_audio(concept: dict) -> Path:
 
     _start_keep_alive(suno_auth)
 
-    session = requests.Session(impersonate=REQUESTS_IMPERSONATE)
-    session.headers.update(_SUNO_HEADERS)
+    with requests.Session(impersonate=REQUESTS_IMPERSONATE) as session:
+        session.headers.update(_SUNO_HEADERS)
 
-    clip_ids  = _request_suno_generation(concept, session)
-    audio_url, lyrics = _poll_until_complete(clip_ids[0], session)
-    concept["lyrics"] = lyrics
-    file_path = _download_mp3(audio_url, session)
+        clip_ids  = _request_suno_generation(concept, session)
+        audio_url, lyrics = _poll_until_complete(clip_ids[0], session)
+        concept["lyrics"] = lyrics
+        file_path = _download_mp3(audio_url, session)
+        
     logger.info("=== 음원 파이프라인 완료: %s ===", file_path)
     return file_path
 
@@ -561,8 +562,9 @@ def _poll_until_complete(clip_id: str, session: requests.Session) -> tuple[str, 
 
 @with_retry()
 def _download_mp3(audio_url: str, session: requests.Session) -> Path:
-    """audio_url에서 mp3를 /data/{날짜}_audio.mp3로 다운로드."""
-    file_path = DATA_DIR / f"{datetime.date.today().strftime('%Y%m%d')}_audio.mp3"
+    """audio_url에서 mp3를 /data/{날짜}_{시간}_audio.mp3로 다운로드."""
+    timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+    file_path = DATA_DIR / f"{timestamp}_audio.mp3"
     logger.info("mp3 다운로드 → %s", file_path)
 
     response = session.get(audio_url, stream=True, timeout=60, impersonate=REQUESTS_IMPERSONATE)

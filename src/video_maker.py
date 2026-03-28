@@ -61,6 +61,9 @@ FONT_COLOR  = "white"
 BORDER_W    = 3
 BORDER_COLOR = "black"
 
+if not Path(FONT_PATH).exists():
+    raise FileNotFoundError(f"폰트 파일을 찾을 수 없습니다: {FONT_PATH}\n해당 경로에 폰트가 설치되어 있는지 확인해주세요.")
+
 # DALL-E 3 세로형 해상도 (유튜브 쇼츠 9:16 비율)
 IMAGE_SIZE  = "1024x1792"
 
