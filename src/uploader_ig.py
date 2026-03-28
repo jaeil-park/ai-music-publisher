@@ -7,19 +7,13 @@ uploader_ig.py
     1. Facebook Developer App 생성 및 Instagram Graph API 활성화
     2. 비즈니스/크리에이터 Instagram 계정 연결
     3. 장기 액세스 토큰 발급 (60일 유효, 주기적 갱신 필요)
-    4. .env에 IG_USER_ID, IG_ACCESS_TOKEN 설정
+    4. .env에 IG_USER_ID, IG_ACCESS_TOKEN, GITHUB_TOKEN, GITHUB_VIDEO_REPO 설정
 
 필수 권한 (App 레벨):
     - instagram_basic
     - instagram_content_publish
     - pages_show_list
     - pages_read_engagement
-
-중요 제약사항:
-    - 영상 파일은 공개 URL이 필요 (로컬 파일 직접 업로드 불가)
-    - 로컬 파일은 먼저 클라우드 스토리지에 업로드 후 URL 전달 필요
-    - 현재 스켈레톤은 IG_VIDEO_HOST_URL 환경변수로 외부 호스팅 URL을 받음
-    - 실제 운영 시 S3/GCS/Cloudflare R2 등의 스토리지 연동 필요
 
 의존성:
     pip install requests python-dotenv
@@ -33,6 +27,7 @@ from functools import wraps
 
 import requests
 from dotenv import load_dotenv
+from src._hosting import upload_to_public_url, delete_github_release
 
 # ---------------------------------------------------------------------------
 # 초기 설정
@@ -120,6 +115,8 @@ def _create_media_container(video_url: str, caption: str) -> str:
 
     logger.info("Instagram 미디어 컨테이너 생성 요청 중... (video_url: %s)", video_url)
     resp = requests.post(url, data=payload, timeout=30)
+    if not resp.ok:
+        logger.error("Instagram API 에러 응답 본문: %s", resp.text)
     resp.raise_for_status()
 
     data = resp.json()
@@ -203,98 +200,6 @@ def _publish_container(creation_id: str) -> str:
     return media_id
 
 # ---------------------------------------------------------------------------
-# Step 0: 로컬 파일 → GitHub Releases 업로드 → 공개 URL 반환
-# ---------------------------------------------------------------------------
-def _create_github_release(tag: str) -> int:
-    """
-    GitHub Releases에 임시 릴리즈를 생성하고 release_id를 반환.
-    """
-    github_repo  = os.getenv("GITHUB_VIDEO_REPO")   # e.g. "username/video-hosting"
-    github_token = os.getenv("GITHUB_TOKEN")
-
-    if not github_repo or not github_token:
-        raise EnvironmentError(".env에 GITHUB_VIDEO_REPO, GITHUB_TOKEN이 설정되지 않았습니다.")
-
-    url = f"https://api.github.com/repos/{github_repo}/releases"
-    headers = {
-        "Authorization": f"Bearer {github_token}",
-        "Accept":        "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-    payload = {
-        "tag_name":   tag,
-        "name":       f"Video {tag}",
-        "body":       "Auto-generated release for Instagram upload. Will be deleted after upload.",
-        "draft":      False,
-        "prerelease": True,
-    }
-
-    resp = requests.post(url, json=payload, headers=headers, timeout=30)
-    resp.raise_for_status()
-    release_id = resp.json()["id"]
-    logger.info("GitHub 릴리즈 생성 완료. release_id: %d, tag: %s", release_id, tag)
-    return release_id
-
-
-def _upload_asset_to_release(release_id: int, local_video_path: str) -> str:
-    """
-    릴리즈에 mp4 파일을 에셋으로 업로드하고 공개 다운로드 URL 반환.
-    """
-    github_repo  = os.getenv("GITHUB_VIDEO_REPO")
-    github_token = os.getenv("GITHUB_TOKEN")
-    filename     = Path(local_video_path).name
-
-    upload_url = f"https://uploads.github.com/repos/{github_repo}/releases/{release_id}/assets?name={filename}"
-    headers = {
-        "Authorization": f"Bearer {github_token}",
-        "Content-Type":  "video/mp4",
-        "Accept":        "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-
-    file_size_mb = os.path.getsize(local_video_path) / (1024 * 1024)
-    logger.info("GitHub에 영상 업로드 중... (%.1fMB)", file_size_mb)
-
-    with open(local_video_path, "rb") as f:
-        resp = requests.post(upload_url, data=f, headers=headers, timeout=300)
-    resp.raise_for_status()
-
-    download_url = resp.json()["browser_download_url"]
-    logger.info("GitHub 업로드 완료. 공개 URL: %s", download_url)
-    return download_url
-
-
-def _delete_github_release(release_id: int):
-    """
-    Instagram 업로드 완료 후 GitHub 임시 릴리즈를 삭제해 용량 확보.
-    """
-    github_repo  = os.getenv("GITHUB_VIDEO_REPO")
-    github_token = os.getenv("GITHUB_TOKEN")
-
-    url = f"https://api.github.com/repos/{github_repo}/releases/{release_id}"
-    headers = {
-        "Authorization": f"Bearer {github_token}",
-        "Accept":        "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-    try:
-        requests.delete(url, headers=headers, timeout=15)
-        logger.info("GitHub 임시 릴리즈 삭제 완료. release_id: %d", release_id)
-    except Exception as e:
-        logger.warning("GitHub 릴리즈 삭제 실패 (수동 삭제 필요): %s", e)
-
-
-def _upload_to_public_url(local_video_path: str) -> tuple[str, int]:
-    """
-    로컬 mp4를 GitHub Releases에 업로드하고 (공개 URL, release_id) 반환.
-    Instagram 업로드 후 release_id로 릴리즈를 삭제해야 합니다.
-    """
-    tag = f"video-{int(time.time())}"
-    release_id   = _create_github_release(tag)
-    download_url = _upload_asset_to_release(release_id, local_video_path)
-    return download_url, release_id
-
-# ---------------------------------------------------------------------------
 # 메인 진입 함수
 # ---------------------------------------------------------------------------
 def upload_to_instagram(video_path: str, caption: str) -> str:
@@ -313,7 +218,7 @@ def upload_to_instagram(video_path: str, caption: str) -> str:
 
     # Step 0: 로컬 파일 → GitHub Releases 공개 URL 변환
     logger.info("[IG Step 0] GitHub Releases에 영상 업로드 중... (%s)", video_path)
-    video_url, release_id = _upload_to_public_url(video_path)
+    video_url, release_id = upload_to_public_url(video_path)
 
     try:
         # Step 1: 미디어 컨테이너 생성
@@ -331,7 +236,7 @@ def upload_to_instagram(video_path: str, caption: str) -> str:
     finally:
         # Step 4: GitHub 임시 릴리즈 삭제 (성공/실패 무관하게 정리)
         logger.info("[IG Step 4] GitHub 임시 릴리즈 정리 중...")
-        _delete_github_release(release_id)
+        delete_github_release(release_id)
 
     logger.info("=== Instagram Reels 업로드 완료! media_id: %s ===", media_id)
     logger.info("Instagram 게시물 링크: https://www.instagram.com/p/%s/", media_id)
