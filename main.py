@@ -82,9 +82,9 @@ def main():
         )
         logger.info("🎉 유튜브 업로드 성공! Video URL: https://youtu.be/%s", video_id)
 
-        # [Step 4] 틱톡 업로드
-        logger.info("[Step 4] TikTok 업로드 시작")
-        upload_to_tiktok(video_path=str(mp4_path), title=title)
+        # [Step 4] 틱톡 업로드 (일시 스킵 - chunk size 오류 해결 전까지 비활성화)
+        # upload_to_tiktok(video_path=str(mp4_path), title=title)
+        logger.info("[Step 4] TikTok 업로드 스킵 (비활성화 상태)")
 
         # [Step 5] 임시 파일 정리 (아카이빙)
         logger.info("[Step 6] 임시 파일 정리 및 아카이빙")
