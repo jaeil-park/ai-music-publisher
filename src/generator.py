@@ -11,6 +11,7 @@ import json
 import time
 import uuid
 import base64
+import random
 import logging
 import datetime
 from pathlib import Path
@@ -51,6 +52,66 @@ SUNO_BASE_URL        = os.getenv("SUNO_BASE_URL", "https://studio-api-prod.suno.
 CLERK_JS_VERSION     = "5.117.0"
 CLERK_API_VERSION    = "2025-11-10"
 REQUESTS_IMPERSONATE = "chrome110"
+
+# ---------------------------------------------------------------------------
+# 음악 컨셉 카테고리 풀
+# (label: LLM에 전달할 지시문 seed, weight: 선택 확률 가중치)
+# ---------------------------------------------------------------------------
+CONCEPT_POOL = [
+    # ── K-pop 계열 ──────────────────────────────────────────────────
+    {"id": "girl_group",   "weight": 8,
+     "label": "최신 걸그룹 K-POP 타이틀곡 (아이브/뉴진스/르세라핌 스타일. 세련되고 중독적인 훅)",
+     "genre_hint": "K-pop girl group, trendy pop, synth-driven"},
+    {"id": "boy_group",    "weight": 8,
+     "label": "최신 보이그룹 K-POP 타이틀곡 (BTS/세븐틴/스트레이키즈 스타일. 강렬한 드롭)",
+     "genre_hint": "K-pop boy group, powerful pop, cinematic"},
+    {"id": "kpop_ballad",  "weight": 7,
+     "label": "K-POP 감성 발라드 (드라마 OST 느낌. 피아노+스트링, 감동적인 클라이맥스)",
+     "genre_hint": "K-pop ballad, emotional, piano-driven, orchestral"},
+    {"id": "kpop_rnb",     "weight": 6,
+     "label": "K-POP R&B / 소울 트랙 (그루비한 비트, 부드러운 보컬, 어반 감성)",
+     "genre_hint": "K-pop R&B, neo soul, groovy, urban"},
+    # ── 국내 특수 장르 ───────────────────────────────────────────────
+    {"id": "trot",         "weight": 6,
+     "label": "모던 트로트 / 뽕끼 (임영웅·영탁 스타일. 중독적인 멜로디, 한국적 정서)",
+     "genre_hint": "Korean trot, upbeat, addictive melody, traditional Korean pop"},
+    {"id": "indie_acoustic","weight": 6,
+     "label": "인디 어쿠스틱 (잔잔한 기타, 서정적인 가사, 10cm·적재 감성)",
+     "genre_hint": "Korean indie, acoustic guitar, lo-fi, introspective"},
+    {"id": "band_rock",    "weight": 5,
+     "label": "인디 밴드 록 (라이브 드럼+기타, 에너지 넘치는 사운드, DAY6·CNBLUE 스타일)",
+     "genre_hint": "Korean indie rock, live band, guitar-driven, energetic"},
+    {"id": "hiphop_trap",  "weight": 6,
+     "label": "한국 힙합 / 트랩 (딥한 808 베이스, 라임 있는 랩 가사, 지코·기리보이 스타일)",
+     "genre_hint": "Korean hip-hop, trap, 808 bass, rhythmic rap"},
+    # ── 글로벌 장르 ─────────────────────────────────────────────────
+    {"id": "edm_festival", "weight": 7,
+     "label": "EDM 빅룸 하우스 / 페스티벌 트랙 (빌드업-드롭 구조, 신나는 에너지)",
+     "genre_hint": "big room EDM, festival house, energetic drop, euphoric"},
+    {"id": "city_pop",     "weight": 6,
+     "label": "시티팝 / 레트로 80s (야마시타 타츠로 스타일, 부드러운 신스, 드라이빙 바이브)",
+     "genre_hint": "city pop, retro 80s, synthwave, smooth, nostalgic"},
+    {"id": "latin_pop",    "weight": 5,
+     "label": "라틴팝 / 레게톤 (댄서블한 리듬, 한국어+스페인어 믹스 가능)",
+     "genre_hint": "latin pop, reggaeton, danceable, vibrant"},
+    {"id": "lofi_jazz",    "weight": 5,
+     "label": "로파이 재즈 칠아웃 (공부할 때 듣는 음악, 재즈 코드, 릴렉싱 비트)",
+     "genre_hint": "lo-fi jazz, chillhop, study music, mellow"},
+    # ── 특별 카테고리 ────────────────────────────────────────────────
+    {"id": "children",     "weight": 10,
+     "label": "중독성 강한 어린이 동요/챈트 (유아가 따라 부르기 쉬운 단순 멜로디, "
+              "동물·음식·색깔 등 소재, 틱톡에서 바이럴될 만한 귀여운 훅 포함)",
+     "genre_hint": "catchy children song, playful, simple melody, nursery rhyme vibes"},
+    {"id": "meme_dance",   "weight": 8,
+     "label": "틱톡/릴스 챌린지 밈 댄스곡 (짧고 강렬한 훅, 반복적 안무 구간, 유머러스한 가사)",
+     "genre_hint": "viral dance pop, TikTok challenge, catchy hook, fun"},
+    {"id": "workout",      "weight": 6,
+     "label": "헬스장/운동 하이프 트랙 (빠른 BPM 140+, 강렬한 베이스, 동기부여 가사)",
+     "genre_hint": "workout hype, high BPM, motivational, bass-heavy"},
+    {"id": "sleep_calm",   "weight": 4,
+     "label": "힐링/수면 유도 음악 (ASMR 감성, 부드러운 보컬, 자연 소리 연상)",
+     "genre_hint": "healing, sleep music, ambient, soft vocal, peaceful"},
+]
 
 # ---------------------------------------------------------------------------
 # Suno 인증 관리
@@ -375,56 +436,67 @@ def generate_daily_concept() -> dict:
     """
     logger.info("OpenAI로 오늘의 음악 컨셉 기획 시작...")
 
-    # 현재 KST(한국 시간) 계산 (GitHub Actions의 UTC 환경 보정)
-    now_utc    = datetime.datetime.utcnow()
-    now_kst    = now_utc + datetime.timedelta(hours=9)
-    today      = now_kst.date()
-    hour       = now_kst.hour
+    # 현재 KST 계산
+    now_utc = datetime.datetime.now(datetime.timezone.utc)
+    now_kst = now_utc + datetime.timedelta(hours=9)
+    today   = now_kst.date()
+    hour    = now_kst.hour
 
-    weekday_kr = ["월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일"][today.weekday()]
-    month      = today.month
-    season     = (
+    month  = today.month
+    season = (
         "봄" if 3 <= month <= 5 else
         "여름" if 6 <= month <= 8 else
         "가을" if 9 <= month <= 11 else
         "겨울"
     )
 
-    # 시간대에 따른 분위기 키워드 분기
-    if hour < 12:  # 오전 9시 실행
-        time_of_day, time_mood = "아침", "상쾌하고 활기찬, 희망찬, 모닝 커피"
-    else:  # 오후 6시 실행
-        time_of_day, time_mood = "저녁", "차분하고 감성적인, 하루를 마무리하는, 칠링"
+    # ── 카테고리 랜덤 선택 ─────────────────────────────────────────
+    # 날짜 + 시간대(오전/오후)를 시드로 사용 → 같은 실행 슬롯에서는 동일 결과,
+    # 하루 2회 실행(오전/오후)이면 서로 다른 카테고리가 나옴.
+    rng = random.Random(today.toordinal() * 2 + (0 if hour < 12 else 1))
+    pool_weights   = [c["weight"] for c in CONCEPT_POOL]
+    concept_choice = rng.choices(CONCEPT_POOL, weights=pool_weights, k=1)[0]
+
+    logger.info("오늘의 카테고리: [%s] (%s)", concept_choice["id"], concept_choice["label"][:30])
+
+    # 어린이 동요 카테고리는 가사 지침을 별도 적용
+    if concept_choice["id"] == "children":
+        lyrics_guide = (
+            "가사는 유아(3~7세)가 따라 부르기 쉬운 짧고 반복적인 구조로 작성하세요. "
+            "동물, 음식, 색깔, 계절 등 친숙한 소재를 사용하고, 의성어·의태어를 적극 활용하세요. "
+            "[Verse], [Chorus] 구조를 유지하되 각 라인은 짧게(7자 이내) 작성하세요."
+        )
+    else:
+        lyrics_guide = (
+            "가사는 한국어 위주로, 최소 15~20줄 이상, [Verse]/[Pre-Chorus]/[Chorus]/[Bridge] "
+            "등 구조를 포함해 1분 이상 길이의 곡이 나올 수 있도록 충분한 분량으로 작성하세요."
+        )
 
     system_prompt = (
-        "당신은 트렌디하고 다재다능한 글로벌 음악 프로듀서입니다. 매일 전혀 다른 장르와 분위기의 히트곡 컨셉을 기획합니다.\n"
-        "팝, R&B, 힙합, EDM, 록, 인디 등 다양한 장르를 넘나들며, 때로는(약 20% 확률로) 중독성 강한 밈(Meme) 스타일의 '트렌디한 어린이용 동요/댄스곡'도 기획합니다.\n"
+        "당신은 장르를 자유자재로 넘나드는 글로벌 음악 프로듀서입니다.\n"
+        "주어진 '오늘의 장르 카테고리'에 충실한 히트곡 컨셉을 기획합니다.\n"
+        "카테고리의 장르적 특성을 정확히 반영해야 하며, K-POP으로 획일화하지 마세요.\n"
         "반드시 아래 JSON 형식으로만 응답하세요. 다른 텍스트는 절대 포함하지 마세요.\n"
         "{\n"
-        '  "genre": "Suno API에 들어갈 장르 및 스타일 태그 (영문, 쉼표로 구분. 예: trendy pop, upbeat / catchy children song, electro / acoustic chillhop)",\n'
+        '  "genre": "Suno API 장르/스타일 태그 (영문, 쉼표 구분. 카테고리에 맞는 구체적 태그 사용)",\n'
         '  "mood": "분위기 키워드 (한글, 3단어 이내)",\n'
-        '  "lyrics": "실제 생성될 노래의 가사 (한국어 위주. 최소 15~20줄 이상, [Verse], [Chorus] 등 구조 포함하여 1분 이상 길이의 곡이 나올 수 있도록 충분한 분량으로 작성)",\n'
-        '  "title": "유튜브 쇼츠용 제목 (한글, 시선을 끄는 매력적인 유튜브 감성 제목, 30자 이내)",\n'
-        '  "description": "유튜브 설명란 소개 및 트렌디한 해시태그 3~5개 포함 (한글, 100자 이내)"\n'
+        f' "lyrics": "노래 가사. {lyrics_guide}",\n'
+        '  "title": "유튜브 쇼츠용 제목 (한글, 클릭을 유도하는 후킹 감성, 30자 이내)",\n'
+        '  "description": "유튜브 설명 + 트렌디한 해시태그 3~5개 (한글, 100자 이내)"\n'
         "}"
     )
-    
-    weekend_guide = (
-        "\n\n[특별 지침] 오늘은 주말(토/일)입니다! 주말의 들뜬 기분을 반영하여, 시간대와 상관없이 "
-        "에너제틱한 파티 음악, EDM, 페스티벌, 드라이브에 어울리는 신나는 팝 등 경쾌한 장르를 최우선으로 기획하세요."
-    ) if today.weekday() >= 5 else ""
-    
+
     user_prompt = (
-        f"현재 한국 시간: {now_kst.strftime('%Y-%m-%d %H:%M')} ({weekday_kr}, {season}, {time_of_day})\n\n"
-        f"이 시간대의 특징('{time_of_day}' - {time_mood})과 계절감을 seed로 활용해 "
-        "지금 이 순간 듣기 딱 좋은 독특하고 매력적인 K-POP 음악 컨셉 하나를 기획해 주세요.\n"
-        "시간대마다 전혀 다른 느낌이 나도록 장르와 악기 구성을 창의적으로 제안해야 합니다. "
-        "아이돌 그룹의 타이틀곡이나 인기 수록곡 같은 느낌으로, 대중적이면서도 세련된 사운드를 지향하세요."
-        "\n\n[제목 작성 지침] 유튜브 제목('title')은 밋밋하게 쓰지 말고, 시청자의 호기심을 자극하고 클릭을 유도하는 '어그로/후킹' 감성으로 작성하세요. "
-        "(예: '나만 알고 싶은 새벽 2시 감성 플리', '10초 만에 분위기 찢는 퇴근길 노래', '듣자마자 소름 돋는 아침 텐션업 플레이리스트')"
-        "\n\n[설명 및 해시태그 지침] 유튜브 설명란('description')에는 시청자의 공감을 이끌어내는 감성적인 소개글과 함께, 검색 노출을 극대화할 수 있는 트렌디한 해시태그(#)를 3~5개 이상 풍부하게 포함하세요. "
-        "(예: #감성음악 #출근길 #플레이리스트 #알고리즘 #인디음악)"
-        f"{weekend_guide}"
+        f"【오늘의 장르 카테고리】\n{concept_choice['label']}\n\n"
+        f"【Suno 장르 힌트】\n{concept_choice['genre_hint']}\n\n"
+        f"【참고 컨텍스트】현재 한국: {season}, {'오전' if hour < 12 else '오후'} "
+        f"(가사 소재에 자연스럽게 녹여도 좋지만, 카테고리 장르를 최우선으로 할 것)\n\n"
+        "위 카테고리에 딱 맞는 독창적인 음악 컨셉을 기획해주세요.\n"
+        "genre 필드는 힌트를 참고해 Suno에서 잘 동작하는 구체적인 영문 태그로 작성하세요.\n\n"
+        "[제목] 클릭을 유도하는 후킹 감성으로 작성하세요.\n"
+        "(예: '한번 들으면 머릿속에서 안 떠나는 노래', '이 장르 이렇게 신선할 수 있어?', "
+        "'알고리즘이 숨겨둔 명곡')\n\n"
+        "[설명] 해당 장르/카테고리 청취자가 공감할 소개글 + 검색 노출용 해시태그 포함."
     )
 
     client   = OpenAI(api_key=OPENAI_API_KEY)
