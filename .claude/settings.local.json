@@ -4,7 +4,9 @@
       "WebFetch(domain:platform.acedata.cloud)",
       "WebSearch",
       "WebFetch(domain:dev.to)",
-      "Bash(python -c \"import curl_cffi; print\\(''curl_cffi version:'', curl_cffi.__version__\\); from curl_cffi.requests import BrowserType; print\\(''지원 브라우저:'', [e.name for e in BrowserType]\\)\")"
+      "Bash(python -c \"import curl_cffi; print\\(''curl_cffi version:'', curl_cffi.__version__\\); from curl_cffi.requests import BrowserType; print\\(''지원 브라우저:'', [e.name for e in BrowserType]\\)\")",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
     ]
   }
 }
