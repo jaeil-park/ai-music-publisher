@@ -5,3 +5,4 @@ __pycache__/
 *.mp3
 *.mp4
 *.png
+.claude/settings.local.json
