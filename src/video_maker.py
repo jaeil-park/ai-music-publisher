@@ -51,13 +51,15 @@ BG_PATH     = DATA_DIR / "background.png"
 OUTPUT_PATH = DATA_DIR / "output_shorts.mp4"
 
 if platform.system() == "Windows":
-    FONT_PATH = "C:/Windows/Fonts/malgun.ttf"
+    FONT_PATH     = "C:/Windows/Fonts/malgun.ttf"
+    SUBTITLE_FONT = "Malgun Gothic"
 else:
-    FONT_PATH = "/usr/share/fonts/truetype/nanum/NanumGothic.ttf"
+    FONT_PATH     = "/usr/share/fonts/truetype/nanum/NanumGothic.ttf"
+    SUBTITLE_FONT = "NanumGothic"
 
-FONT_SIZE   = 80
-FONT_COLOR  = "white"
-BORDER_W    = 3
+FONT_SIZE    = 80
+FONT_COLOR   = "white"
+BORDER_W     = 3
 BORDER_COLOR = "black"
 
 if not Path(FONT_PATH).exists():
@@ -65,6 +67,13 @@ if not Path(FONT_PATH).exists():
 
 # DALL-E 3 세로형 해상도 (유튜브 쇼츠 9:16 비율)
 IMAGE_SIZE  = "1024x1792"
+
+# 배경 애니메이션: DALL-E 이미지를 110% 확대 후 sin/cos 표류 (GIF 대비 고품질, 인코딩 빠름)
+# BIG = 확대된 크기, OUT = 최종 출력 크기, DRIFT = 표류 여유 절반
+_OUT_W, _OUT_H = 1024, 1792
+_BIG_W, _BIG_H = 1126, 1970          # _OUT * 1.099 (짝수)
+_DRIFT_X = (_BIG_W - _OUT_W) // 2    # 51 px
+_DRIFT_Y = (_BIG_H - _OUT_H) // 2    # 89 px
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
@@ -234,23 +243,37 @@ def _generate_background(concept: dict, out_path: Path) -> Path:
 @with_retry()
 def _compose_video(bg_path: Path, mp3_path: Path, title: str, srt_path: Path | None, output_path: Path) -> Path:
     """
-    FFmpeg로 정적 이미지 + mp3를 합성하여 mp4 생성.
+    FFmpeg로 애니메이션 배경 + mp3를 합성하여 mp4 생성.
 
-    - 오디오 길이에 맞춰 이미지를 루프
-    - 제목은 상단 drawtext, Whisper SRT 자막은 하단 subtitles 필터로 오버레이
-    - libass 미지원 환경에서는 자막 없이 폴백 합성
-    - pix_fmt yuv420p: 유튜브/SNS 호환성 확보
+    배경 효과:
+      - 110% 스케일업 후 sin/cos 표류 크롭 (Ken Burns-lite)
+      - GIF 대비 품질 손실 없이 생동감 있는 배경 구현, 인코딩 속도 영향 없음
+    레이어:
+      - [하] 표류 배경
+      - [중] 제목 drawtext (상단 배치)
+      - [상] Whisper SRT 자막 subtitles 필터 (libass 필요, 실패 시 폴백)
     """
     logger.info("FFmpeg 합성 시작: %s + %s → %s", bg_path.name, mp3_path.name, output_path.name)
 
     wrapped_title = textwrap.fill(title, width=14)
     safe_title    = _escape_drawtext(wrapped_title)
+    audio_stream  = ffmpeg.input(str(mp3_path))
 
-    video_stream = ffmpeg.input(str(bg_path), loop=1, framerate=25)
-    audio_stream = ffmpeg.input(str(mp3_path))
+    # ── 배경: 110% 확대 후 사인파 표류 (생동감 있는 켄번즈 효과) ──────────
+    # 주기: x ≈ 78초(2π/0.08), y ≈ 105초(2π/0.06) → 시작/끝이 자연스럽게 다름
+    video_bg = (
+        ffmpeg.input(str(bg_path), loop=1, framerate=25)
+        .filter("scale", _BIG_W, _BIG_H)
+        .filter(
+            "crop",
+            _OUT_W, _OUT_H,
+            f"{_DRIFT_X}+{_DRIFT_X // 2}*sin(t*0.08)",
+            f"{_DRIFT_Y}+{_DRIFT_Y // 2}*cos(t*0.06)",
+        )
+    )
 
     # 제목은 상단 배치 (하단 자막 영역 확보)
-    video_with_title = video_stream.filter(
+    video_with_title = video_bg.filter(
         "drawtext",
         fontfile=FONT_PATH,
         text=safe_title,
@@ -276,14 +299,14 @@ def _compose_video(bg_path: Path, mp3_path: Path, title: str, srt_path: Path | N
         shortest=None,
     )
 
-    # Whisper 자막 오버레이 시도 (libass 필요)
+    # Whisper 자막 오버레이 시도 (libass 필요; Ubuntu FFmpeg 기본 포함)
     if srt_path and srt_path.exists():
         try:
             video_with_subs = video_with_title.filter(
                 "subtitles",
                 _to_ffmpeg_path(srt_path),
                 force_style=(
-                    "FontName=Malgun Gothic,"
+                    f"FontName={SUBTITLE_FONT},"
                     "FontSize=20,"
                     "Bold=1,"
                     "PrimaryColour=&H00FFFFFF,"
