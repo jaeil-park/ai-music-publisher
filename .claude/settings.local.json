@@ -19,7 +19,10 @@
       "Bash(python -c \"import ast; ast.parse\\(open\\(''src/generator.py''\\).read\\(\\)\\); print\\(''OK''\\)\")",
       "mcp__claude_ai_Notion__notion-search",
       "mcp__claude_ai_Notion__notion-fetch",
-      "mcp__claude_ai_Notion__notion-create-pages"
+      "mcp__claude_ai_Notion__notion-create-pages",
+      "Bash(git rm:*)",
+      "Bash(git push:*)",
+      "Bash(python -m py_compile src/generator.py)"
     ]
   }
 }
