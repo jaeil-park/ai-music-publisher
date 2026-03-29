@@ -24,8 +24,7 @@ logger = logging.getLogger("main")
 
 # 각 단계 모듈 임포트
 from src.brain import generate_daily_concept
-from src.dalle_vision import generate_background_image, InsufficientCreditsError
-from src.gemini_vision import generate_background_image_gemini
+from src.dalle_vision import generate_background_image
 from src.stability_audio import generate_and_download_audio
 from src.video_maker import make_video
 from src.uploader import upload_to_youtube
@@ -67,12 +66,8 @@ def main():
             tags.append("Shorts")
 
         # [Step 1] 배경 이미지 생성 (DALL-E 3)
-        try:
-            logger.info("[Step 1] DALL-E 3 9:16 배경 이미지 생성 시작")
-            image_path = generate_background_image(concept["image_prompt"])
-        except InsufficientCreditsError:
-            logger.info("[Step 1 Fallback] Gemini Vision으로 배경 이미지 생성 시작")
-            image_path = generate_background_image_gemini(concept["image_prompt"])
+        logger.info("[Step 1] DALL-E 3 9:16 배경 이미지 생성 시작")
+        image_path = generate_background_image(concept["image_prompt"])
 
         # [Step 2] 음원 생성 (Stability Audio API)
         logger.info("[Step 2] Stability Audio 음원 생성 시작")

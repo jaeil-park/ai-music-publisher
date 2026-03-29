@@ -1,7 +1,6 @@
 """
 brain.py
-역할: Gemini 1.5 Flash (텍스트) API를 사용하여 오늘의 음악/영상 컨셉을 기획합니다.
-      (과거 OpenAI의 역할을 대체합니다)
+역할: OpenAI GPT-4o-mini API를 사용하여 오늘의 음악/영상 컨셉을 기획합니다.
 """
 
 import os
@@ -11,13 +10,13 @@ import random
 from datetime import date
 from pathlib import Path
 
-import google.generativeai as genai
 from dotenv import load_dotenv
+from openai import OpenAI
 
 load_dotenv(dotenv_path=Path(__file__).parent.parent / ".env")
 logger = logging.getLogger(__name__)
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 CATEGORIES = [
     "걸그룹 K-POP (아이브/뉴진스 스타일)",
@@ -39,12 +38,11 @@ CATEGORIES = [
 ]
 
 def generate_daily_concept(ep_number: int) -> dict:
-    logger.info("=== Gemini API로 오늘의 음악/영상 컨셉 기획 시작 ===")
-    if not GEMINI_API_KEY:
-        raise ValueError("GEMINI_API_KEY가 설정되지 않았습니다.")
+    logger.info("=== OpenAI API로 오늘의 음악/영상 컨셉 기획 시작 ===")
+    if not OPENAI_API_KEY:
+        raise ValueError("OPENAI_API_KEY가 설정되지 않았습니다.")
 
-    genai.configure(api_key=GEMINI_API_KEY)
-    model = genai.GenerativeModel("gemini-1.5-flash")
+    client = OpenAI(api_key=OPENAI_API_KEY)
 
     # 날짜를 시드로 사용하여 매일 다른 카테고리 로테이션
     today_idx = date.today().toordinal()
@@ -52,8 +50,8 @@ def generate_daily_concept(ep_number: int) -> dict:
     category = random.choice(CATEGORIES)
     logger.info("오늘의 선정 카테고리: %s", category)
 
-    prompt = f"""
-    당신은 숏폼 콘텐츠를 기획하는 전문 AI 디렉터입니다.
+    system_prompt = "당신은 숏폼 콘텐츠를 기획하는 전문 AI 디렉터입니다. 반드시 유효한 JSON 형식으로만 응답하세요."
+    user_prompt = f"""
     오늘의 테마는 '{category}' 입니다. 이 테마에 맞춰 아래 JSON 스키마 구조로 기획안을 작성해주세요.
     
     {{
@@ -65,14 +63,18 @@ def generate_daily_concept(ep_number: int) -> dict:
     }}
     """
 
-    response = model.generate_content(
-        prompt,
-        generation_config=genai.GenerationConfig(response_mime_type="application/json")
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ],
+        response_format={"type": "json_object"}
     )
 
     try:
-        concept = json.loads(response.text)
+        concept = json.loads(response.choices[0].message.content)
         return concept
     except json.JSONDecodeError as e:
-        logger.error("JSON 파싱 에러: %s\n원본 응답: %s", e, response.text)
+        logger.error("JSON 파싱 에러: %s\n원본 응답: %s", e, response.choices[0].message.content)
         raise
