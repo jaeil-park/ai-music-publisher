@@ -397,7 +397,8 @@ def with_retry(max_retries: int = MAX_RETRIES, delay: int = RETRY_DELAY):
                                     func.__name__, attempt, max_retries
                                 )
                                 suno_auth.refresh_token()
-                                continue  # 딜레이 없이 바로 다음 시도
+                                time.sleep(15)  # Suno 서버 측 세션 동기화 대기
+                                continue
                         except (json.JSONDecodeError, AttributeError):
                             # JSON 파싱 실패 등은 일반 에러로 간주하고 아래에서 처리
                             pass
