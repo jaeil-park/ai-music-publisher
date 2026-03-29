@@ -278,33 +278,20 @@ class SunoCookie:
         except Exception as e:
             logger.debug("POST /touch 실패 (무시됨): %s", e)
 
-        # Step 3: POST /tokens?template=suno_api → aud=suno-api JWT 발급
+        # Step 3: POST /tokens → 브라우저 __session 쿠키와 동일한 JWT 발급
         token = None
         r3 = requests.post(
-            f"https://auth.suno.com/v1/client/sessions/{session_id}/tokens?{qs}&template=suno_api",
+            f"https://auth.suno.com/v1/client/sessions/{session_id}/tokens?{qs}",
             headers={**auth_headers, "Content-Length": "0"},
             impersonate=REQUESTS_IMPERSONATE,
             timeout=15,
         )
+        logger.debug("POST /tokens 응답 %d: %s", r3.status_code, r3.text[:200])
         if r3.ok:
             token = r3.json().get("jwt")
 
-        # Step 4: template 없이 폴백
         if not token:
-            logger.warning("POST /tokens (suno_api 템플릿) 실패 (%d). 템플릿 없이 재시도...", r3.status_code)
-            r4 = requests.post(
-                f"https://auth.suno.com/v1/client/sessions/{session_id}/tokens?{qs}",
-                headers={**auth_headers, "Content-Length": "0"},
-                impersonate=REQUESTS_IMPERSONATE,
-                timeout=15,
-            )
-            if r4.ok:
-                token = r4.json().get("jwt")
-            else:
-                raise ValueError(f"JWT 발급 실패. 응답: {str(r4.text)[:200]}")
-
-        if not token:
-            raise ValueError("JWT 발급 실패 (token is None).")
+            raise ValueError(f"JWT 발급 실패. /tokens 응답: {str(r3.text)[:200]}")
 
         self._token = token
 
@@ -322,6 +309,7 @@ class SunoCookie:
             kid     = header.get("kid", "?")
             exp_str = datetime.datetime.fromtimestamp(exp).strftime("%Y-%m-%d %H:%M:%S") if exp else "?"
             logger.info("JWT 갱신 완료 | aud=%s | kid=%s | 만료=%s", aud, kid, exp_str)
+            logger.debug("JWT 클레임 전체: %s", json.dumps(payload, ensure_ascii=False))
             if aud != "suno-api":
                 logger.warning("⚠️ JWT aud 클레임이 'suno-api'가 아닙니다 (현재: %s).", aud)
             if kid != "suno-api-rs256-key-1":
