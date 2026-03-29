@@ -7,7 +7,19 @@
       "Bash(python -c \"import curl_cffi; print\\(''curl_cffi version:'', curl_cffi.__version__\\); from curl_cffi.requests import BrowserType; print\\(''지원 브라우저:'', [e.name for e in BrowserType]\\)\")",
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "WebFetch(domain:developers.tiktok.com)"
+      "WebFetch(domain:developers.tiktok.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:pypi.org)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:community.n8n.io)",
+      "Bash(git remote:*)",
+      "Bash(python -c \"import ast; ast.parse\\(open\\(''src/generator.py''\\).read\\(\\)\\); print\\(''syntax OK''\\)\")",
+      "Bash(python -c \":*)",
+      "Bash(python -c \"import ast; ast.parse\\(open\\(''src/video_maker.py''\\).read\\(\\)\\); print\\(''OK''\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\(''src/generator.py''\\).read\\(\\)\\); print\\(''OK''\\)\")",
+      "mcp__claude_ai_Notion__notion-search",
+      "mcp__claude_ai_Notion__notion-fetch",
+      "mcp__claude_ai_Notion__notion-create-pages"
     ]
   }
 }
