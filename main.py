@@ -23,7 +23,7 @@ logging.basicConfig(
 logger = logging.getLogger("main")
 
 # 각 단계 모듈 임포트
-from src.generator import generate_daily_concept, generate_and_download_audio
+from src.generator import generate_daily_concept, generate_and_download_audio, save_updated_cookie_to_env
 from src.video_maker import make_video, BG_PATH
 from src.uploader import upload_to_youtube
 from src.uploader_tiktok import upload_to_tiktok
@@ -137,6 +137,9 @@ def main():
         fail_msg = f"🚨 **[실패] AI 음악 자동화 파이프라인 오류 발생**\n> **에러 내용:** `{str(e)}`"
         send_discord_notification(fail_msg)
         sys.exit(1)
+    finally:
+        # 성공/실패 무관하게 갱신된 SUNO_COOKIE를 .env에 저장 → GitHub Actions 로테이션에 반영
+        save_updated_cookie_to_env()
 
 if __name__ == "__main__":
     main()
