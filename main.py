@@ -23,9 +23,8 @@ logging.basicConfig(
 logger = logging.getLogger("main")
 
 # 각 단계 모듈 임포트
-from src.brain import generate_daily_concept
-from src.dalle_vision import generate_background_image
-from src.stability_audio import generate_and_download_audio
+from src.llm_agent import generate_daily_concept
+from src.media_generator import generate_background_image, generate_and_download_audio
 from src.video_maker import make_video
 from src.uploader import upload_to_youtube
 from src.uploader_tiktok import upload_to_tiktok
@@ -57,16 +56,17 @@ def main():
         # 에피소드 번호 (2025-01-01 기준 누적 일수)
         ep = (datetime.date.today() - datetime.date(2025, 1, 1)).days + 1
         
-        # [Step 0] 오늘의 컨셉 기획 (Gemini Text)
+        # [Step 0] 오늘의 컨셉 기획 (OpenAI GPT-4o-mini)
         concept = generate_daily_concept(ep_number=ep)
         title = concept.get("title", f"AI Music Shorts #{ep}")
         description = concept.get("description", "Daily AI generated music.")
         tags = concept.get("tags", ["AImusic", "Shorts", "Music"])
+        on_screen_text = concept.get("on_screen_text", "AI Music Vibes")
         if "Shorts" not in tags:
             tags.append("Shorts")
 
-        # [Step 1] 배경 이미지 생성 (DALL-E 3)
-        logger.info("[Step 1] DALL-E 3 9:16 배경 이미지 생성 시작")
+        # [Step 1] 배경 이미지 생성 (Stability Image Core)
+        logger.info("[Step 1] Stability Image 9:16 배경 이미지 생성 시작")
         image_path = generate_background_image(concept["image_prompt"])
 
         # [Step 2] 음원 생성 (Stability Audio API)
@@ -75,7 +75,7 @@ def main():
 
         # [Step 3] 영상 합성 (FFmpeg)
         logger.info("[Step 3] FFmpeg 쇼츠 영상 중앙 자막 합성 시작")
-        mp4_path = make_video(title=title, image_path=image_path, audio_path=audio_path)
+        mp4_path = make_video(on_screen_text=on_screen_text, image_path=image_path, audio_path=audio_path)
 
         # [Step 4] 유튜브 쇼츠 업로드
         logger.info("[Step 4] YouTube Data API를 통한 쇼츠 업로드 시작")

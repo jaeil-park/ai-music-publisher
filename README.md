@@ -90,8 +90,7 @@ pip install -r requirements.txt
 ```
 
 시스템 FFmpeg (libass 포함 버전) 설치 필요:
-- **Windows**: [gyan.dev/ffmpeg](https://www.gyan.dev/ffmpeg/builds/) → `full_build` 다운로드
-- **Ubuntu/Debian**: `sudo apt-get install -y ffmpeg fonts-nanum`
+- **Windows**: gyan.dev/ffmpeg → `ffmpeg-git-full.7z` 다운로드 후 `bin` 폴더를 Path 환경변수에 추가
 
 ### 2. .env 설정
 
@@ -99,10 +98,8 @@ pip install -r requirements.txt
 # OpenAI
 OPENAI_API_KEY=sk-...
 
-# Suno (브라우저 F12 → Application → Cookies → suno.com 전체 복사)
-SUNO_COOKIE=__client=eyJ...; __session=eyJ...; ajs_anonymous_id=...
-SESSION_ID=session_xxxxx
-SUNO_BASE_URL=https://studio-api-prod.suno.com/api
+# Stability AI (Audio & Image)
+STABILITY_API_KEY=sk-...
 
 # YouTube (client_secrets.json 별도 설정)
 # (OAuth 인증은 최초 1회 브라우저 로그인으로 token.json 자동 저장)

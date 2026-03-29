@@ -1,7 +1,7 @@
 """
 video_maker.py
-역할: DALL-E 3로 배경 이미지 생성 → FFmpeg로 이미지+음원 합성 → 유튜브 쇼츠용 mp4 출력
-파이프라인 순서: brain.py -> generator.py -> [video_maker.py] -> uploader.py
+역할: FFmpeg로 동적 애니메이션(Ken Burns) 적용 이미지 + 음원 합성 → 유튜브 쇼츠용 mp4 출력
+파이프라인 순서: llm_agent.py -> media_generator.py -> [video_maker.py] -> uploader.py
 
 의존성 설치:
     pip install ffmpeg-python
@@ -46,10 +46,11 @@ DATA_DIR.mkdir(exist_ok=True)
 OUTPUT_PATH = DATA_DIR / "output_shorts.mp4"
 
 if platform.system() == "Windows":
-    FONT_PATH = "C:/Windows/Fonts/arial.ttf"
+    FONT_PATH = "C:/Windows/Fonts/malgun.ttf"
 else:
     FONT_PATH = next(
         (p for p in (
+            "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
             "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
             "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
             "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
@@ -92,12 +93,12 @@ def with_retry(max_retries: int = MAX_RETRIES, delay: int = RETRY_DELAY):
 # ---------------------------------------------------------------------------
 # 공개 진입점
 # ---------------------------------------------------------------------------
-def make_video(title: str, image_path: Path, audio_path: Path) -> Path:
+def make_video(on_screen_text: str, image_path: Path, audio_path: Path) -> Path:
     """
     이미지 + 음원 + 중앙 텍스트 자막을 합성하여 mp4 비디오 생성.
 
     Args:
-        title: 영상 중앙에 들어갈 자막 텍스트
+        on_screen_text: 영상 중앙에 들어갈 한국어 감성 자막 텍스트
         image_path: 생성된 배경 이미지 경로 (9:16)
         audio_path: 생성된 오디오 경로
 
@@ -106,7 +107,7 @@ def make_video(title: str, image_path: Path, audio_path: Path) -> Path:
     """
     logger.info("=== 영상 제작 파이프라인 시작 ===")
 
-    _compose_video(image_path, audio_path, title, OUTPUT_PATH)
+    _compose_video(image_path, audio_path, on_screen_text, OUTPUT_PATH)
 
     logger.info("=== 영상 제작 완료: %s ===", OUTPUT_PATH)
     return OUTPUT_PATH
@@ -115,49 +116,40 @@ def make_video(title: str, image_path: Path, audio_path: Path) -> Path:
 # ---------------------------------------------------------------------------
 # 내부 헬퍼 함수
 # ---------------------------------------------------------------------------
-def _to_ascii_title(title: str) -> str:
-    """Non-ASCII 문자 제거 후 영문/숫자만 남김. 비어 있으면 'Music' 반환."""
-    ascii_only = "".join(c for c in title if ord(c) < 128).strip()
-    # 연속 공백 정리
-    import re
-    return re.sub(r"\s+", " ", ascii_only) or "Music"
-
-
-def _to_ffmpeg_path(path: Path) -> str:
-    """
-    FFmpeg subtitles 필터용 경로 이스케이프.
-    Windows 드라이브 문자 뒤의 콜론을 이스케이프 (C:/ → C\\:/).
-    """
-    p = str(path).replace("\\", "/")
-    if len(p) >= 2 and p[1] == ":":
-        p = p[0] + "\\:" + p[2:]
-    return p
-
-
 @with_retry()
-def _compose_video(bg_path: Path, audio_path: Path, title: str, output_path: Path) -> Path:
+def _compose_video(bg_path: Path, audio_path: Path, on_screen_text: str, output_path: Path) -> Path:
     """
-    FFmpeg로 배경 이미지와 오디오를 합성하고 중앙에 텍스트를 오버레이하여 mp4 생성.
+    FFmpeg로 배경 이미지(Ken Burns 애니메이션), 오디오, 중앙 텍스트를 합성하여 mp4 생성.
     """
     logger.info("FFmpeg 합성 시작: %s + %s → %s", bg_path.name, audio_path.name, output_path.name)
 
-    ascii_title   = _to_ascii_title(title)
-    wrapped_title = textwrap.fill(ascii_title, width=16)
-    safe_title    = _escape_drawtext(wrapped_title)
+    wrapped_text  = textwrap.fill(on_screen_text, width=20)
+    safe_text     = _escape_drawtext(wrapped_text)
     audio_stream  = ffmpeg.input(str(audio_path))
 
-    # 배경 이미지 스트림 (루프, 프레임레이트, 9:16 비율로 스케일)
+    _OUT_W, _OUT_H = 1080, 1920
+    _BIG_W, _BIG_H = 1188, 2112          # 출력 해상도보다 10% 크게
+    _DRIFT_X = (_BIG_W - _OUT_W) // 2
+    _DRIFT_Y = (_BIG_H - _OUT_H) // 2
+
+    # ── 배경: 110% 확대 후 사인파 표류 (Ken Burns 애니메이션 효과) ──
     video_bg = (
         ffmpeg.input(str(bg_path), loop=1, framerate=25)
-        .filter("scale", w=1080, h=1920)
+        .filter("scale", _BIG_W, _BIG_H)
+        .filter(
+            "crop",
+            _OUT_W, _OUT_H,
+            f"{_DRIFT_X}+{_DRIFT_X // 2}*sin(t*0.05)",
+            f"{_DRIFT_Y}+{_DRIFT_Y // 2}*cos(t*0.03)",
+        )
     )
 
-    # 영문 제목 오버레이 (폰트 없으면 건너뜀)
+    # 중앙 감성 텍스트 오버레이
     if FONT_PATH:
         video_final = video_bg.filter(
             "drawtext",
             fontfile=FONT_PATH,
-            text=safe_title,
+            text=safe_text,
             fontsize=FONT_SIZE,
             fontcolor=FONT_COLOR,
             borderw=BORDER_W,

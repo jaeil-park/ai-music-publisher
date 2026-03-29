@@ -1,6 +1,6 @@
 """
-brain.py
-역할: OpenAI GPT-4o-mini API를 사용하여 오늘의 음악/영상 컨셉을 기획합니다.
+llm_agent.py
+역할: OpenAI GPT-4o-mini API를 사용하여 숏폼 컨셉, 텍스트, 프롬프트를 JSON 형태로 기획합니다.
 """
 
 import os
@@ -38,28 +38,26 @@ CATEGORIES = [
 ]
 
 def generate_daily_concept(ep_number: int) -> dict:
-    logger.info("=== OpenAI API로 오늘의 음악/영상 컨셉 기획 시작 ===")
+    logger.info("=== OpenAI API로 오늘의 숏폼 컨셉 기획 시작 ===")
     if not OPENAI_API_KEY:
         raise ValueError("OPENAI_API_KEY가 설정되지 않았습니다.")
 
     client = OpenAI(api_key=OPENAI_API_KEY)
-
-    # 날짜를 시드로 사용하여 매일 다른 카테고리 로테이션
-    today_idx = date.today().toordinal()
-    random.seed(today_idx)
+    random.seed(date.today().toordinal())
     category = random.choice(CATEGORIES)
     logger.info("오늘의 선정 카테고리: %s", category)
 
-    system_prompt = "당신은 숏폼 콘텐츠를 기획하는 전문 AI 디렉터입니다. 반드시 유효한 JSON 형식으로만 응답하세요."
+    system_prompt = "당신은 숏폼 콘텐츠를 기획하는 전문 AI 디렉터입니다. 반드시 유효한 JSON 형식으로 응답하세요."
     user_prompt = f"""
-    오늘의 테마는 '{category}' 입니다. 이 테마에 맞춰 아래 JSON 스키마 구조로 기획안을 작성해주세요.
+    오늘의 테마는 '{category}' 입니다. 아래 JSON 스키마로 기획안을 작성해주세요.
     
     {{
-      "title": "유튜브 쇼츠에 올릴 영문 제목 (마지막에 #{ep_number} 포함)",
-      "description": "유튜브 설명란에 들어갈 소개글과 해시태그 (영어)",
-      "tags": ["AImusic", "Shorts", "관련 장르 태그 3개"],
-      "audio_prompt": "Stability Audio AI용 프롬프트 (악기, 장르, 무드 위주의 쉼표 구분 영문. 보컬보다는 비트/악기 중심 묘사)",
-      "image_prompt": "DALL-E 3 AI용 9:16 배경 이미지 영문 프롬프트 (풍경, 조명, 분위기 위주. 텍스트나 사람 얼굴 제외)"
+      "title": "유튜브 쇼츠 영문 제목 (마지막에 #{ep_number} 포함)",
+      "description": "유튜브 설명란 영문 소개글",
+      "tags": ["AImusic", "Shorts", "관련 태그 3개"],
+      "on_screen_text": "영상 중앙에 띄울 짧고 감성적인 한국어 문구 (1~2줄)",
+      "audio_prompt": "Stability Audio API용 영문 프롬프트 (최대 3분 길이의 곡. 보컬 특징, 악기, 분위기 쉼표 구분)",
+      "image_prompt": "Stability Image API용 영문 프롬프트 (9:16 비율 세로형 배경, 고화질 텍스트/워터마크 제외)"
     }}
     """
 
@@ -72,9 +70,4 @@ def generate_daily_concept(ep_number: int) -> dict:
         response_format={"type": "json_object"}
     )
 
-    try:
-        concept = json.loads(response.choices[0].message.content)
-        return concept
-    except json.JSONDecodeError as e:
-        logger.error("JSON 파싱 에러: %s\n원본 응답: %s", e, response.choices[0].message.content)
-        raise
+    return json.loads(response.choices[0].message.content)
