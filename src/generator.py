@@ -51,7 +51,7 @@ _COOKIE_STR    = os.getenv("SUNO_COOKIE")
 SUNO_BASE_URL        = os.getenv("SUNO_BASE_URL", "https://studio-api-prod.suno.com/api")
 CLERK_JS_VERSION     = "5.117.0"
 CLERK_API_VERSION    = "2025-11-10"
-REQUESTS_IMPERSONATE = "chrome110"
+REQUESTS_IMPERSONATE = "chrome131"
 
 # ---------------------------------------------------------------------------
 # 음악 컨셉 카테고리 풀
@@ -117,11 +117,16 @@ CONCEPT_POOL = [
 # Suno 인증 관리
 # ---------------------------------------------------------------------------
 _SUNO_HEADERS = {
-    "User-Agent":     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-    "Origin":         "https://suno.com",
-    "Referer":        "https://suno.com/",
-    "Sec-Fetch-Site": "same-site",
-    "Sec-Fetch-Mode": "cors",
+    # curl_cffi impersonation이 UA·sec-ch-ua·accept-* 를 자동 설정하므로 생략.
+    # 브라우저 캡처 기준 app-specific 헤더만 명시.
+    "User-Agent":        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Origin":            "https://suno.com",
+    "Referer":           "https://suno.com/",
+    "Sec-Fetch-Site":    "same-site",
+    "Sec-Fetch-Mode":    "cors",
+    "Sec-Fetch-Dest":    "empty",
+    "Accept":            "*/*",
+    "Accept-Language":   "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
 }
 
 
@@ -262,59 +267,69 @@ class SunoCookie:
                 "브라우저에서 suno.com에 재로그인 후 SUNO_COOKIE를 .env에 새로 붙여넣으세요."
             )
 
-        # Step 2: POST /touch → sid가 포함된 최신 JWT 발급
-        # GET last_active_token은 구형 템플릿(sid 없음) JWT를 반환할 수 있음.
-        # /touch는 브라우저와 동일한 방식으로 현재 JWT 템플릿(sid 포함)을 사용해 신규 발급.
+        # Step 2: POST /touch (Clerk 세션 연장용 - fire and forget)
+        try:
+            requests.post(
+                f"https://auth.suno.com/v1/client/sessions/{session_id}/touch?{qs}",
+                headers={**auth_headers, "Content-Length": "0"},
+                impersonate=REQUESTS_IMPERSONATE,
+                timeout=15,
+            )
+        except Exception as e:
+            logger.debug("POST /touch 실패 (무시됨): %s", e)
+
+        # Step 3: POST /tokens?template=suno_api → aud=suno-api JWT 발급
         token = None
-        r2 = requests.post(
-            f"https://auth.suno.com/v1/client/sessions/{session_id}/touch?{qs}",
+        r3 = requests.post(
+            f"https://auth.suno.com/v1/client/sessions/{session_id}/tokens?{qs}&template=suno_api",
             headers={**auth_headers, "Content-Length": "0"},
             impersonate=REQUESTS_IMPERSONATE,
             timeout=15,
         )
-        if r2.ok:
-            touch_data    = r2.json()
-            touch_session = touch_data.get("response") or touch_data.get("client", {}).get("sessions", [{}])[0]
-            if isinstance(touch_session, dict):
-                token = touch_session.get("last_active_token", {}).get("jwt")
+        if r3.ok:
+            token = r3.json().get("jwt")
 
-        # Step 3: /touch 실패 시 POST /tokens 폴백
+        # Step 4: template 없이 폴백
         if not token:
-            logger.warning("POST /touch 실패 (%d). POST /tokens로 폴백합니다...",
-                           r2.status_code if r2 else -1)
-            r3 = requests.post(
+            logger.warning("POST /tokens (suno_api 템플릿) 실패 (%d). 템플릿 없이 재시도...", r3.status_code)
+            r4 = requests.post(
                 f"https://auth.suno.com/v1/client/sessions/{session_id}/tokens?{qs}",
                 headers={**auth_headers, "Content-Length": "0"},
                 impersonate=REQUESTS_IMPERSONATE,
                 timeout=15,
             )
-            if r3.ok:
-                token = r3.json().get("jwt")
-            if not token:
-                raise ValueError(f"JWT 발급 실패. 응답: {str(r3.text)[:200]}")
+            if r4.ok:
+                token = r4.json().get("jwt")
+            else:
+                raise ValueError(f"JWT 발급 실패. 응답: {str(r4.text)[:200]}")
+
+        if not token:
+            raise ValueError("JWT 발급 실패 (token is None).")
 
         self._token = token
 
-        # JWT 디코딩 → kid·sid·만료 즉시 검증
+        # JWT 디코딩 → kid·aud·만료 검증 (브라우저 캡처 확인: sid 클레임 없는 것이 정상)
         try:
-            header  = json.loads(base64.b64decode(token.split(".")[0] + "==").decode())
-            padded  = token.split(".")[1] + "=="
-            payload = json.loads(base64.b64decode(padded).decode())
+            def _decode_b64(s: str) -> dict:
+                s = s + "=" * ((4 - len(s) % 4) % 4)
+                return json.loads(base64.urlsafe_b64decode(s).decode())
+
+            parts   = token.split(".")
+            header  = _decode_b64(parts[0])
+            payload = _decode_b64(parts[1])
             exp     = payload.get("exp", 0)
             aud     = payload.get("aud", "?")
             kid     = header.get("kid", "?")
-            sid     = payload.get("sid", "MISSING")
             exp_str = datetime.datetime.fromtimestamp(exp).strftime("%Y-%m-%d %H:%M:%S") if exp else "?"
-            logger.info("JWT 갱신 완료 | aud=%s | kid=%s | sid=%s | 만료=%s",
-                        aud, kid, sid[:24] if sid != "MISSING" else "MISSING", exp_str)
-            if sid == "MISSING":
-                logger.warning("⚠️  JWT에 sid 클레임 없음. Suno가 거부할 수 있습니다.")
+            logger.info("JWT 갱신 완료 | aud=%s | kid=%s | 만료=%s", aud, kid, exp_str)
+            if aud != "suno-api":
+                logger.warning("⚠️ JWT aud 클레임이 'suno-api'가 아닙니다 (현재: %s).", aud)
             if kid != "suno-api-rs256-key-1":
                 logger.warning("⚠️  예상치 못한 JWT kid=%s.", kid)
             if exp and exp < time.time():
                 logger.warning("⚠️  발급된 JWT가 이미 만료됨. SUNO_COOKIE를 갱신하세요.")
-        except Exception:
-            logger.info("JWT 토큰 갱신 완료 (payload 파싱 불가).")
+        except Exception as e:
+            logger.info("JWT 토큰 갱신 완료 (payload 파싱 불가: %s).", e)
 
     def get_token(self) -> str | None:
         return self._token
@@ -388,23 +403,19 @@ def with_retry(max_retries: int = MAX_RETRIES, delay: int = RETRY_DELAY):
                 try:
                     return func(*args, **kwargs)
                 except Exception as e:
-                    # Suno API의 'Token validation failed' (422) 에러에 대한 특수 처리
-                    if isinstance(e, requests.exceptions.HTTPError) and e.response.status_code == 422 and attempt < max_retries:
+                    # 401/422 인증 오류 → 즉시 토큰 갱신 후 재시도
+                    if isinstance(e, requests.exceptions.HTTPError) and e.response.status_code in (401, 422) and attempt < max_retries:
                         try:
-                            if "token validation failed" in e.response.json().get("detail", "").lower():
-                                logger.warning(
-                                    "[%s] 토큰 인증 실패(422). 즉시 토큰을 갱신하고 재시도합니다. (시도 %d/%d)",
-                                    func.__name__, attempt, max_retries
-                                )
-                                suno_auth.refresh_token()
-                                time.sleep(15)  # Suno 서버 측 세션 동기화 대기
-                                continue
-                        except (json.JSONDecodeError, AttributeError):
-                            # JSON 파싱 실패 등은 일반 에러로 간주하고 아래에서 처리
-                            pass
+                            logger.warning(
+                                "[%s] 인증 오류(%d). 토큰 갱신 후 재시도합니다. (시도 %d/%d)",
+                                func.__name__, e.response.status_code, attempt, max_retries
+                            )
+                            suno_auth.refresh_token()
                         except Exception as refresh_e:
                             logger.critical("토큰 갱신 중 치명적 오류 발생: %s", refresh_e)
-                            raise refresh_e # 토큰 갱신 실패는 즉시 중단
+                            raise refresh_e
+                        time.sleep(15)
+                        continue
 
                     # 그 외 모든 예외 또는 마지막 시도
                     logger.error("[%s] 시도 %d/%d 실패: %s", func.__name__, attempt, max_retries, e)
@@ -602,6 +613,9 @@ def _pre_check(session: requests.Session) -> None:
 @with_retry()
 def _request_suno_generation(concept: dict, session: requests.Session) -> list[str]:
     """Suno API에 음악 생성 요청 후 clip_id 목록 반환."""
+    # Generate 호출 직전에 항상 session-id 갱신 시도 (재시도 시 갱신된 토큰으로 재발급)
+    _pre_check(session)
+
     logger.info("Suno 생성 요청 → 장르: [%s] | 가사: '%s...'", concept.get("genre"), concept.get("lyrics", "")[:30])
 
     # 브라우저 Network 탭에서 확인한 실제 payload 구조 (v2-web 기준)
