@@ -115,8 +115,8 @@ TIKTOK_PRIVACY_LEVEL=SELF_ONLY   # SELF_ONLY | PUBLIC_TO_EVERYONE
 # Instagram Graph API
 IG_USER_ID=...
 IG_ACCESS_TOKEN=IGAAf...
-GITHUB_TOKEN=ghp_...              # 영상 임시 호스팅용
-GITHUB_VIDEO_REPO=username/repo
+GITHUB_TOKEN=ghp_...              # IG 업로드용 임시 호스팅 PAT (repo 스코프 필요)
+GITHUB_VIDEO_REPO=your_username/your_repo_name # 예: "johndoe/ai-music-publisher"
 
 # Discord 알림 (선택)
 DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...

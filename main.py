@@ -29,7 +29,7 @@ from src.dalle_vision import generate_background_image # DALL-E 모듈 재활성
 from src.video_maker import make_video
 from src.uploader import upload_to_youtube
 from src.uploader_tiktok import upload_to_tiktok
-from src.uploader_ig import upload_to_instagram
+# from src.uploader_ig import upload_to_instagram
 
 # 경로 및 아카이브 설정
 BASE_DIR = Path(__file__).parent
@@ -106,16 +106,16 @@ def main():
         tiktok_title = f"{title} 🎵 Full playlist on YouTube → @Chillhop_AI"
         upload_to_tiktok(video_path=str(mp4_path), title=tiktok_title)
 
-        # [Step 6] Instagram Reels 업로드
-        logger.info("[Step 6] Instagram Reels 업로드 시작")
-        ig_caption = (
-            f"{title}\n\n"
-            f"{description}\n\n"
-            f"[Lyrics]\n{lyrics if lyrics else 'AI Generated Music'}\n\n"
-            f"🎵 Full playlist on YouTube → @chillhop_ai\n\n"
-            f"#AImusic #AIgenerated #chillhop #lofi #music #reels #newmusic"
-        )
-        upload_to_instagram(video_path=str(mp4_path), caption=ig_caption)
+        # [Step 6] Instagram Reels 업로드 (토큰 문제로 임시 비활성화)
+        # logger.info("[Step 6] Instagram Reels 업로드 시작")
+        # ig_caption = (
+        #     f"{title}\n\n"
+        #     f"{description}\n\n"
+        #     f"[Lyrics]\n{lyrics if lyrics else 'AI Generated Music'}\n\n"
+        #     f"🎵 Full playlist on YouTube → @chillhop_ai\n\n"
+        #     f"#AImusic #AIgenerated #chillhop #lofi #music #reels #newmusic"
+        # )
+        # upload_to_instagram(video_path=str(mp4_path), caption=ig_caption)
 
         # [Step 7] 임시 파일 정리 (아카이빙)
         logger.info("[Step 7] 임시 파일 정리 및 아카이빙")
@@ -135,6 +135,12 @@ def main():
         )
         send_discord_notification(success_msg)
 
+    except OSError as e:
+        if "GITHUB_VIDEO_REPO" in str(e) or "GITHUB_TOKEN" in str(e):
+            logger.critical("인스타그램 업로드용 GitHub 호스팅 설정 오류: %s", e, exc_info=True)
+            fail_msg = f"🚨 **[설정 오류] 인스타그램 업로드 실패**\n> `.env` 또는 GitHub Secrets에 `GITHUB_TOKEN`과 `GITHUB_VIDEO_REPO`를 설정해야 합니다. `README.md`를 참고하여 PAT 토큰을 발급하고 설정해주세요."
+            send_discord_notification(fail_msg)
+            sys.exit(1)
     except Exception as e:
         logger.critical("파이프라인 실행 중 치명적인 오류 발생: %s", e, exc_info=True)
         fail_msg = f"🚨 **[실패] AI 음악 자동화 파이프라인 오류 발생**\n> **에러 내용:** `{str(e)}`"
