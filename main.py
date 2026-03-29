@@ -24,7 +24,8 @@ logger = logging.getLogger("main")
 
 # 각 단계 모듈 임포트
 from src.llm_agent import generate_daily_concept
-from src.media_generator import generate_background_image, generate_and_download_audio
+from src.media_generator import generate_and_download_audio
+from src.dalle_vision import generate_background_image # DALL-E 모듈 재활성화
 from src.video_maker import make_video
 from src.uploader import upload_to_youtube
 from src.uploader_tiktok import upload_to_tiktok
@@ -60,13 +61,14 @@ def main():
         concept = generate_daily_concept(ep_number=ep)
         title = concept.get("title", f"AI Music Shorts #{ep}")
         description = concept.get("description", "Daily AI generated music.")
+        lyrics = concept.get("lyrics", "")
         tags = concept.get("tags", ["AImusic", "Shorts", "Music"])
         on_screen_text = concept.get("on_screen_text", "AI Music Vibes")
         if "Shorts" not in tags:
             tags.append("Shorts")
 
-        # [Step 1] 배경 이미지 생성 (Stability Image Core)
-        logger.info("[Step 1] Stability Image 9:16 배경 이미지 생성 시작")
+        # [Step 1] 배경 이미지 생성 (DALL-E 3)
+        logger.info("[Step 1] DALL-E 3 9:16 배경 이미지 생성 시작")
         image_path = generate_background_image(concept["image_prompt"])
 
         # [Step 2] 음원 생성 (Stability Audio API)
@@ -80,13 +82,19 @@ def main():
         # [Step 4] 유튜브 쇼츠 업로드
         logger.info("[Step 4] YouTube Data API를 통한 쇼츠 업로드 시작")
 
-        description += "\n\n🎵 Subscribe for daily AI music drops!"
+        # 최종 유튜브 설명란 구성 (곡 설명 + 가사 + 추천 해시태그)
+        final_description = f"{description}\n\n🎵 Subscribe for daily AI music drops!"
+        if lyrics:
+            final_description += f"\n\n[Lyrics]\n{lyrics}"
+        
+        # 추천 해시태그 추가
+        final_description += "\n\n#AImusic #Shorts #Lofi #Chillhop #Music #AI #GenerativeAI"
         
         # 실제 서비스 배포이므로 'public(공개)' 상태로 업로드
         video_id = upload_to_youtube(
             video_path=str(mp4_path),
             title=title,
-            description=description,
+            description=final_description,
             tags=tags,
             privacy_status="public",
             thumbnail_path=str(image_path)
@@ -103,6 +111,7 @@ def main():
         ig_caption = (
             f"{title}\n\n"
             f"{description}\n\n"
+            f"[Lyrics]\n{lyrics if lyrics else 'AI Generated Music'}\n\n"
             f"🎵 Full playlist on YouTube → @chillhop_ai\n\n"
             f"#AImusic #AIgenerated #chillhop #lofi #music #reels #newmusic"
         )

@@ -145,33 +145,34 @@ def _compose_video(bg_path: Path, audio_path: Path, on_screen_text: str, output_
     )
 
     # 중앙 감성 텍스트 오버레이
-    if FONT_PATH:
-        video_final = video_bg.filter(
-            "drawtext",
-            fontfile=FONT_PATH,
-            text=safe_text,
-            fontsize=FONT_SIZE,
-            fontcolor=FONT_COLOR,
-            borderw=BORDER_W,
-            bordercolor=BORDER_COLOR,
-            shadowx=2,
-            shadowy=2,
-            shadowcolor="black",
-            box=1,
-            boxcolor="black@0.5",
-            x="(w-text_w)/2",
-            y="(h-text_h)/2",
-            line_spacing=20,
-        )
-    else:
-        video_final = video_bg
+    video_final = video_bg
+    if FONT_PATH and wrapped_text:
+        lines = wrapped_text.split('\n')
+        num_lines = len(lines)
+        line_height = FONT_SIZE + 20  # 폰트 크기 + 줄 간격
+        total_text_height = num_lines * line_height - 20
+
+        for i, line in enumerate(lines):
+            safe_line = _escape_drawtext(line)
+            y_pos = f"(h - {total_text_height})/2 + {i * line_height}"
+            video_final = video_final.filter(
+                "drawtext",
+                fontfile=FONT_PATH,
+                text=safe_line,
+                fontsize=FONT_SIZE,
+                fontcolor=FONT_COLOR,
+                borderw=BORDER_W,
+                bordercolor=BORDER_COLOR,
+                x="(w-text_w)/2",
+                y=y_pos,
+            )
 
     output_kwargs = dict(
         vcodec="libx264",
         acodec="aac",
         audio_bitrate="192k",
         pix_fmt="yuv420p",
-        shortest=None,
+        shortest=None, # 음원 길이에 맞춰 영상 종료 (최대 3분)
     )
 
     (
