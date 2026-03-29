@@ -30,7 +30,8 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install openai curl_cffi ffmpeg-python google-api-python-client google-auth-httplib2 google-auth-oauthlib python-dotenv requests
+          # Install from requirements.txt if it exists
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
       - name: Restore Secret Files
         env:
@@ -45,18 +46,3 @@ jobs:
       - name: Run Main Pipeline
         run: |
           python main.py
-
-      - name: Rotate SUNO_COOKIE secret (세션 유지)
-        if: always()
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}
-        run: |
-          # 파이프라인 실행 후 갱신된 .env를 ENV_FILE 시크릿에 덮어쓰기
-          # → 다음 실행 때도 최신 __client 쿠키를 사용
-          if [ -f .env ] && [ -n "$GH_TOKEN" ]; then
-            gh secret set ENV_FILE < .env
-            echo "✅ ENV_FILE secret updated with rotated SUNO_COOKIE"
-          else
-            echo "⚠️  GH_PAT가 없거나 .env 없음 → 시크릿 갱신 건너뜀"
-          fi

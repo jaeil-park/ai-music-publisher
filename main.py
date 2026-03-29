@@ -23,8 +23,11 @@ logging.basicConfig(
 logger = logging.getLogger("main")
 
 # 각 단계 모듈 임포트
-from src.generator import generate_daily_concept, generate_and_download_audio, save_updated_cookie_to_env
-from src.video_maker import make_video, BG_PATH
+from src.brain import generate_daily_concept
+from src.dalle_vision import generate_background_image, InsufficientCreditsError
+from src.gemini_vision import generate_background_image_gemini
+from src.stability_audio import generate_and_download_audio
+from src.video_maker import make_video
 from src.uploader import upload_to_youtube
 from src.uploader_tiktok import upload_to_tiktok
 from src.uploader_ig import upload_to_instagram
@@ -52,41 +55,38 @@ def main():
     ARCHIVE_DIR.mkdir(exist_ok=True)
 
     try:
-        # [Step 1] 기획 및 음원 생성
-        logger.info("[Step 1] 오늘의 음악 컨셉 기획 및 Suno 음원 생성 시작")
-        concept = generate_daily_concept()
-        mp3_path = generate_and_download_audio(concept)
-
-        # [Step 2] 영상 합성 (DALL-E 이미지 + 음원)
-        logger.info("[Step 2] DALL-E 배경 이미지 생성 및 FFmpeg 쇼츠 영상 합성 시작")
-        mp4_path = make_video(concept, mp3_path)
-
-        # [Step 3] 유튜브 쇼츠 업로드
-        logger.info("[Step 3] YouTube Data API를 통한 쇼츠 업로드 시작")
-        
         # 에피소드 번호 (2025-01-01 기준 누적 일수)
         ep = (datetime.date.today() - datetime.date(2025, 1, 1)).days + 1
+        
+        # [Step 0] 오늘의 컨셉 기획 (Gemini Text)
+        concept = generate_daily_concept(ep_number=ep)
+        title = concept.get("title", f"AI Music Shorts #{ep}")
+        description = concept.get("description", "Daily AI generated music.")
+        tags = concept.get("tags", ["AImusic", "Shorts", "Music"])
+        if "Shorts" not in tags:
+            tags.append("Shorts")
 
-        # 컨셉 데이터에서 유튜브 메타데이터 추출
-        base_title = concept.get("title", "AI Music Vibes")
-        title = f"{base_title} #{ep}"
-        genre_tag  = concept.get("genre", "Music").split(",")[0].strip()
-        mood_tag   = concept.get("mood", "chill").split()[0]
+        # [Step 1] 배경 이미지 생성 (DALL-E 3)
+        try:
+            logger.info("[Step 1] DALL-E 3 9:16 배경 이미지 생성 시작")
+            image_path = generate_background_image(concept["image_prompt"])
+        except InsufficientCreditsError:
+            logger.info("[Step 1 Fallback] Gemini Vision으로 배경 이미지 생성 시작")
+            image_path = generate_background_image_gemini(concept["image_prompt"])
 
-        description = (
-            concept.get("description", "AI-composed melody of the day. Sit back and enjoy.")
-            + "\n\n🎵 Save this track & subscribe for daily AI music drops."
-        )
-        tags = [
-            "AImusic", "AIgenerated", "artificialintelligence",
-            genre_tag, mood_tag,
-            "Shorts", "YouTubeShorts", "music", "newmusic",
-        ]
+        # [Step 2] 음원 생성 (Stability Audio API)
+        logger.info("[Step 2] Stability Audio 음원 생성 시작")
+        audio_path = generate_and_download_audio(concept["audio_prompt"])
 
-        # 생성된 가사가 있다면 유튜브 설명란에 추가
-        if concept.get("lyrics"):
-            description += f"\n\n[Lyrics]\n{concept['lyrics'].strip()}"
+        # [Step 3] 영상 합성 (FFmpeg)
+        logger.info("[Step 3] FFmpeg 쇼츠 영상 중앙 자막 합성 시작")
+        mp4_path = make_video(title=title, image_path=image_path, audio_path=audio_path)
 
+        # [Step 4] 유튜브 쇼츠 업로드
+        logger.info("[Step 4] YouTube Data API를 통한 쇼츠 업로드 시작")
+
+        description += "\n\n🎵 Subscribe for daily AI music drops!"
+        
         # 실제 서비스 배포이므로 'public(공개)' 상태로 업로드
         video_id = upload_to_youtube(
             video_path=str(mp4_path),
@@ -94,33 +94,32 @@ def main():
             description=description,
             tags=tags,
             privacy_status="public",
-            thumbnail_path=str(BG_PATH)
+            thumbnail_path=str(image_path)
         )
         logger.info("유튜브 업로드 성공! Video URL: https://youtu.be/%s", video_id)
 
-        # [Step 4] 틱톡 업로드 (YouTube 채널 크로스프로모 포함)
-        logger.info("[Step 4] TikTok 업로드 시작")
-        tiktok_title = f"{base_title} #{ep} 🎵 Full playlist on YouTube → @Chillhop_AI"
+        # [Step 5] 틱톡 업로드 (YouTube 채널 크로스프로모 포함)
+        logger.info("[Step 5] TikTok 업로드 시작")
+        tiktok_title = f"{title} 🎵 Full playlist on YouTube → @Chillhop_AI"
         upload_to_tiktok(video_path=str(mp4_path), title=tiktok_title)
 
-        # [Step 5] Instagram Reels 업로드
-        logger.info("[Step 5] Instagram Reels 업로드 시작")
+        # [Step 6] Instagram Reels 업로드
+        logger.info("[Step 6] Instagram Reels 업로드 시작")
         ig_caption = (
-            f"{base_title} #{ep}\n\n"
-            f"{concept.get('description', '')}\n\n"
+            f"{title}\n\n"
+            f"{description}\n\n"
             f"🎵 Full playlist on YouTube → @chillhop_ai\n\n"
             f"#AImusic #AIgenerated #chillhop #lofi #music #reels #newmusic"
         )
         upload_to_instagram(video_path=str(mp4_path), caption=ig_caption)
 
-        # [Step 5] 임시 파일 정리 (아카이빙)
-        logger.info("[Step 6] 임시 파일 정리 및 아카이빙")
-        if mp3_path.exists():
-            shutil.move(str(mp3_path), str(ARCHIVE_DIR / mp3_path.name))
+        # [Step 7] 임시 파일 정리 (아카이빙)
+        logger.info("[Step 7] 임시 파일 정리 및 아카이빙")
+        if audio_path.exists():
+            shutil.move(str(audio_path), str(ARCHIVE_DIR / audio_path.name))
         
-        if BG_PATH.exists():
-            bg_new_name = f"background_{int(time.time())}.png"
-            shutil.move(str(BG_PATH), str(ARCHIVE_DIR / bg_new_name))
+        if image_path.exists():
+            shutil.move(str(image_path), str(ARCHIVE_DIR / image_path.name))
 
         logger.info("========== 🚀 모든 파이프라인이 성공적으로 완료되었습니다 ==========")
         
@@ -137,9 +136,6 @@ def main():
         fail_msg = f"🚨 **[실패] AI 음악 자동화 파이프라인 오류 발생**\n> **에러 내용:** `{str(e)}`"
         send_discord_notification(fail_msg)
         sys.exit(1)
-    finally:
-        # 성공/실패 무관하게 갱신된 SUNO_COOKIE를 .env에 저장 → GitHub Actions 로테이션에 반영
-        save_updated_cookie_to_env()
 
 if __name__ == "__main__":
     main()

@@ -1,6 +1,6 @@
 # AI Music Publisher
 
-매일 자정 자동으로 AI 음악을 작곡하고 YouTube Shorts / TikTok / Instagram Reels에 업로드하는 완전 무인 자동화 파이프라인.
+매일 자정 자동으로 AI 음악을 생성하고 YouTube Shorts / TikTok / Instagram Reels에 업로드하는 완전 무인 자동화 파이프라인.
 
 ## 파이프라인 구조
 
