@@ -268,31 +268,38 @@ class SunoCookie:
                 "브라우저에서 suno.com에 재로그인 후 SUNO_COOKIE를 .env에 새로 붙여넣으세요."
             )
 
-        # Step 2: POST /touch (Clerk 세션 연장용 - fire and forget)
-        try:
-            requests.post(
-                f"https://auth.suno.com/v1/client/sessions/{session_id}/touch?{qs}",
-                headers={**auth_headers, "Content-Length": "0"},
-                impersonate=REQUESTS_IMPERSONATE,
-                timeout=15,
-            )
-        except Exception as e:
-            logger.debug("POST /touch 실패 (무시됨): %s", e)
-
-        # Step 3: POST /tokens → 브라우저 __session 쿠키와 동일한 JWT 발급
+        # Step 2: POST /touch → last_active_token.jwt 획득 (브라우저와 동일한 방식)
         token = None
-        r3 = requests.post(
-            f"https://auth.suno.com/v1/client/sessions/{session_id}/tokens?{qs}",
+        r2 = requests.post(
+            f"https://auth.suno.com/v1/client/sessions/{session_id}/touch?{qs}",
             headers={**auth_headers, "Content-Length": "0"},
             impersonate=REQUESTS_IMPERSONATE,
             timeout=15,
         )
-        logger.debug("POST /tokens 응답 %d: %s", r3.status_code, r3.text[:200])
-        if r3.ok:
-            token = r3.json().get("jwt")
+        if r2.ok:
+            td = r2.json()
+            # response.last_active_token.jwt 우선, 없으면 client.sessions[0].last_active_token.jwt
+            session_obj = td.get("response") or td.get("client", {}).get("sessions", [{}])[0]
+            if isinstance(session_obj, dict):
+                token = session_obj.get("last_active_token", {}).get("jwt")
+            logger.debug("POST /touch 응답 %d | token 획득: %s", r2.status_code, bool(token))
+        else:
+            logger.warning("POST /touch 실패 %d: %s", r2.status_code, r2.text[:200])
+
+        # Step 3: /touch 실패 시 /tokens 폴백
+        if not token:
+            r3 = requests.post(
+                f"https://auth.suno.com/v1/client/sessions/{session_id}/tokens?{qs}",
+                headers={**auth_headers, "Content-Length": "0"},
+                impersonate=REQUESTS_IMPERSONATE,
+                timeout=15,
+            )
+            logger.info("POST /tokens 응답 %d: %s", r3.status_code, r3.text[:300])
+            if r3.ok:
+                token = r3.json().get("jwt")
 
         if not token:
-            raise ValueError(f"JWT 발급 실패. /tokens 응답: {str(r3.text)[:200]}")
+            raise ValueError(f"JWT 발급 실패. /touch: {r2.status_code}")
 
         self._token = token
 
@@ -310,7 +317,7 @@ class SunoCookie:
             kid     = header.get("kid", "?")
             exp_str = datetime.datetime.fromtimestamp(exp).strftime("%Y-%m-%d %H:%M:%S") if exp else "?"
             logger.info("JWT 갱신 완료 | aud=%s | kid=%s | 만료=%s", aud, kid, exp_str)
-            logger.debug("JWT 클레임 전체: %s", json.dumps(payload, ensure_ascii=False))
+            logger.info("JWT 클레임 전체: %s", json.dumps(payload, ensure_ascii=False))
             if aud != "suno-api":
                 logger.warning("⚠️ JWT aud 클레임이 'suno-api'가 아닙니다 (현재: %s).", aud)
             if kid != "suno-api-rs256-key-1":
