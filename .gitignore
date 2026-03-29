@@ -5,7 +5,7 @@ __pycache__/
 *.mp3
 *.mp4
 *.png
-.claude/settings.local.json
+.claude/
 
 # 인증 파일 (GitHub Actions에서 시크릿으로 런타임 생성됨)
 client_secrets.json
