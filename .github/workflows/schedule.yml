@@ -48,6 +48,7 @@ jobs:
 
       - name: Rotate SUNO_COOKIE secret (세션 유지)
         if: always()
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GH_PAT }}
         run: |
