@@ -99,7 +99,7 @@ def main():
 
         # [Step 4] 틱톡 업로드 (YouTube 채널 크로스프로모 포함)
         logger.info("[Step 4] TikTok 업로드 시작")
-        tiktok_title = f"{base_title} #{ep} 🎵 Full playlist on YouTube → search 'AI Music Daily'"
+        tiktok_title = f"{base_title} #{ep} 🎵 Full playlist on YouTube → @Chillhop_AI"
         upload_to_tiktok(video_path=str(mp4_path), title=tiktok_title)
 
         # [Step 5] 임시 파일 정리 (아카이빙)
@@ -113,7 +113,12 @@ def main():
 
         logger.info("========== 🚀 모든 파이프라인이 성공적으로 완료되었습니다 ==========")
         
-        success_msg = f"🎉 **[성공] AI 음악 배포 완료!**\n> **제목:** {title}\n> **링크:** https://youtu.be/{video_id}"
+        success_msg = (
+            f"🎉 **[성공] AI 음악 배포 완료!**\n"
+            f"> **제목:** {title}\n"
+            f"> **링크:** https://youtu.be/{video_id}\n"
+            f"> **채널:** https://www.youtube.com/@Chillhop_AI"
+        )
         send_discord_notification(success_msg)
 
     except Exception as e:
