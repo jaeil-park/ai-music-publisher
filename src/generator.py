@@ -240,10 +240,11 @@ class SunoCookie:
             logger.error("Clerk GET /v1/client 실패 %d: %s", r1.status_code, r1.text[:300])
             r1.raise_for_status()
 
-        # Clerk가 Set-Cookie로 새 __client를 발급하면 즉시 갱신 (세션 연장)
+        # Clerk가 Set-Cookie로 새 __client를 발급하면 즉시 갱신 후 auth_headers도 업데이트
         m = re.search(r'__client=([^;,\s]+)', r1.headers.get("set-cookie", ""))
         if m:
             self._update_raw_cookie("__client", m.group(1))
+            auth_headers = {**_SUNO_HEADERS, "Cookie": f"__client={self.client_cookie}"}
             logger.info("__client 쿠키 자동 갱신됨 (Clerk Set-Cookie).")
 
         data     = r1.json()
