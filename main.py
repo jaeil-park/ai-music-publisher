@@ -63,9 +63,14 @@ def main():
         logger.info("[Step 3] YouTube Data API를 통한 쇼츠 업로드 시작")
         
         # 컨셉 데이터에서 유튜브 메타데이터 추출
-        title = concept.get("title", "AI 감성 음악 #Shorts")
-        description = concept.get("description", "AI가 작곡한 오늘의 감성 멜로디입니다.")
-        tags = ["AI음악", concept.get("genre", "Music"), concept.get("mood", "감성"), "Shorts"]
+        title = concept.get("title", "AI Music Vibes #Shorts")
+        description = concept.get("description", "AI-composed melody of the day. Sit back and enjoy.")
+        tags = [
+            "AImusic", "AIgenerated", "artificialintelligence",
+            concept.get("genre", "Music").split(",")[0].strip(),
+            concept.get("mood", "chill").split()[0],
+            "Shorts", "YouTubeShorts", "music", "newmusic",
+        ]
 
         # 생성된 가사가 있다면 유튜브 설명란에 추가
         if concept.get("lyrics"):

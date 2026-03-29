@@ -473,30 +473,30 @@ def generate_daily_concept() -> dict:
         )
 
     system_prompt = (
-        "당신은 장르를 자유자재로 넘나드는 글로벌 음악 프로듀서입니다.\n"
-        "주어진 '오늘의 장르 카테고리'에 충실한 히트곡 컨셉을 기획합니다.\n"
-        "카테고리의 장르적 특성을 정확히 반영해야 하며, K-POP으로 획일화하지 마세요.\n"
-        "반드시 아래 JSON 형식으로만 응답하세요. 다른 텍스트는 절대 포함하지 마세요.\n"
+        "You are a global music producer who moves freely across genres.\n"
+        "Plan hit song concepts true to the given 'today's genre category'.\n"
+        "Reflect the genre's characteristics accurately — do not default everything to K-POP.\n"
+        "Respond ONLY in the JSON format below. No other text.\n"
         "{\n"
-        '  "genre": "Suno API 장르/스타일 태그 (영문, 쉼표 구분. 카테고리에 맞는 구체적 태그 사용)",\n'
-        '  "mood": "분위기 키워드 (한글, 3단어 이내)",\n'
-        f' "lyrics": "노래 가사. {lyrics_guide}",\n'
-        '  "title": "유튜브 쇼츠용 제목 (한글, 클릭을 유도하는 후킹 감성, 30자 이내)",\n'
-        '  "description": "유튜브 설명 + 트렌디한 해시태그 3~5개 (한글, 100자 이내)"\n'
+        '  "genre": "Suno API genre/style tags (English, comma-separated, specific tags that work well in Suno)",\n'
+        '  "mood": "mood keywords (English, max 3 words)",\n'
+        f' "lyrics": "Song lyrics. {lyrics_guide}",\n'
+        '  "title": "YouTube Shorts title (English, hooky and emotional, max 60 chars, no hashtags)",\n'
+        '  "description": "YouTube description (English) + 3~5 trending hashtags, max 150 chars"\n'
         "}"
     )
 
     user_prompt = (
-        f"【오늘의 장르 카테고리】\n{concept_choice['label']}\n\n"
-        f"【Suno 장르 힌트】\n{concept_choice['genre_hint']}\n\n"
-        f"【참고 컨텍스트】현재 한국: {season}, {'오전' if hour < 12 else '오후'} "
-        f"(가사 소재에 자연스럽게 녹여도 좋지만, 카테고리 장르를 최우선으로 할 것)\n\n"
-        "위 카테고리에 딱 맞는 독창적인 음악 컨셉을 기획해주세요.\n"
-        "genre 필드는 힌트를 참고해 Suno에서 잘 동작하는 구체적인 영문 태그로 작성하세요.\n\n"
-        "[제목] 클릭을 유도하는 후킹 감성으로 작성하세요.\n"
-        "(예: '한번 들으면 머릿속에서 안 떠나는 노래', '이 장르 이렇게 신선할 수 있어?', "
-        "'알고리즘이 숨겨둔 명곡')\n\n"
-        "[설명] 해당 장르/카테고리 청취자가 공감할 소개글 + 검색 노출용 해시태그 포함."
+        f"[Today's Genre Category]\n{concept_choice['label']}\n\n"
+        f"[Suno Genre Hint]\n{concept_choice['genre_hint']}\n\n"
+        f"[Context] Korea: {season} season, {'morning' if hour < 12 else 'afternoon'} "
+        f"(feel free to weave this into lyrics naturally, but prioritize the genre above all)\n\n"
+        "Plan a unique, original music concept that perfectly fits the category above.\n"
+        "Write the genre field as specific English Suno tags based on the hint.\n\n"
+        "[Title] Write in English — hooky, emotional, and scroll-stopping.\n"
+        "(e.g. 'This Beat Will Stay in Your Head All Day', "
+        "'The Hidden Gem the Algorithm Buried', 'You've Never Heard This Genre Sound This Fresh')\n\n"
+        "[Description] Write in English — a short intro that resonates with this genre's listeners + search hashtags."
     )
 
     client   = OpenAI(api_key=OPENAI_API_KEY)
