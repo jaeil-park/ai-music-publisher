@@ -27,6 +27,7 @@ from src.generator import generate_daily_concept, generate_and_download_audio
 from src.video_maker import make_video, BG_PATH
 from src.uploader import upload_to_youtube
 from src.uploader_tiktok import upload_to_tiktok
+from src.uploader_ig import upload_to_instagram
 
 # 경로 및 아카이브 설정
 BASE_DIR = Path(__file__).parent
@@ -101,6 +102,16 @@ def main():
         logger.info("[Step 4] TikTok 업로드 시작")
         tiktok_title = f"{base_title} #{ep} 🎵 Full playlist on YouTube → @Chillhop_AI"
         upload_to_tiktok(video_path=str(mp4_path), title=tiktok_title)
+
+        # [Step 5] Instagram Reels 업로드
+        logger.info("[Step 5] Instagram Reels 업로드 시작")
+        ig_caption = (
+            f"{base_title} #{ep}\n\n"
+            f"{concept.get('description', '')}\n\n"
+            f"🎵 Full playlist on YouTube → @chillhop_ai\n\n"
+            f"#AImusic #AIgenerated #chillhop #lofi #music #reels #newmusic"
+        )
+        upload_to_instagram(video_path=str(mp4_path), caption=ig_caption)
 
         # [Step 5] 임시 파일 정리 (아카이빙)
         logger.info("[Step 6] 임시 파일 정리 및 아카이빙")
