@@ -10,6 +10,7 @@ import time
 import shutil
 import logging
 import requests
+import datetime
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -62,19 +63,28 @@ def main():
         # [Step 3] 유튜브 쇼츠 업로드
         logger.info("[Step 3] YouTube Data API를 통한 쇼츠 업로드 시작")
         
+        # 에피소드 번호 (2025-01-01 기준 누적 일수)
+        ep = (datetime.date.today() - datetime.date(2025, 1, 1)).days + 1
+
         # 컨셉 데이터에서 유튜브 메타데이터 추출
-        title = concept.get("title", "AI Music Vibes #Shorts")
-        description = concept.get("description", "AI-composed melody of the day. Sit back and enjoy.")
+        base_title = concept.get("title", "AI Music Vibes")
+        title = f"{base_title} #{ep}"
+        genre_tag  = concept.get("genre", "Music").split(",")[0].strip()
+        mood_tag   = concept.get("mood", "chill").split()[0]
+
+        description = (
+            concept.get("description", "AI-composed melody of the day. Sit back and enjoy.")
+            + "\n\n🎵 Save this track & subscribe for daily AI music drops."
+        )
         tags = [
             "AImusic", "AIgenerated", "artificialintelligence",
-            concept.get("genre", "Music").split(",")[0].strip(),
-            concept.get("mood", "chill").split()[0],
+            genre_tag, mood_tag,
             "Shorts", "YouTubeShorts", "music", "newmusic",
         ]
 
         # 생성된 가사가 있다면 유튜브 설명란에 추가
         if concept.get("lyrics"):
-            description += f"\n\n[가사]\n{concept['lyrics'].strip()}"
+            description += f"\n\n[Lyrics]\n{concept['lyrics'].strip()}"
 
         # 실제 서비스 배포이므로 'public(공개)' 상태로 업로드
         video_id = upload_to_youtube(
@@ -85,11 +95,12 @@ def main():
             privacy_status="public",
             thumbnail_path=str(BG_PATH)
         )
-        logger.info("🎉 유튜브 업로드 성공! Video URL: https://youtu.be/%s", video_id)
+        logger.info("유튜브 업로드 성공! Video URL: https://youtu.be/%s", video_id)
 
-        # [Step 4] 틱톡 업로드
+        # [Step 4] 틱톡 업로드 (YouTube 채널 크로스프로모 포함)
         logger.info("[Step 4] TikTok 업로드 시작")
-        upload_to_tiktok(video_path=str(mp4_path), title=title)
+        tiktok_title = f"{base_title} #{ep} 🎵 Full playlist on YouTube → search 'AI Music Daily'"
+        upload_to_tiktok(video_path=str(mp4_path), title=tiktok_title)
 
         # [Step 5] 임시 파일 정리 (아카이빙)
         logger.info("[Step 6] 임시 파일 정리 및 아카이빙")

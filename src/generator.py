@@ -94,21 +94,21 @@ CONCEPT_POOL = [
     {"id": "latin_pop",    "weight": 5,
      "label": "라틴팝 / 레게톤 (댄서블한 리듬, 한국어+스페인어 믹스 가능)",
      "genre_hint": "latin pop, reggaeton, danceable, vibrant"},
-    {"id": "lofi_jazz",    "weight": 5,
+    {"id": "lofi_jazz",    "weight": 12,   # ↑ 공부/작업 플레이리스트 → 구독 의도 최상위
      "label": "로파이 재즈 칠아웃 (공부할 때 듣는 음악, 재즈 코드, 릴렉싱 비트)",
      "genre_hint": "lo-fi jazz, chillhop, study music, mellow"},
     # ── 특별 카테고리 ────────────────────────────────────────────────
-    {"id": "children",     "weight": 10,
+    {"id": "children",     "weight": 12,   # ↑ 부모가 반복 재생 → 구독 후 저장
      "label": "중독성 강한 어린이 동요/챈트 (유아가 따라 부르기 쉬운 단순 멜로디, "
               "동물·음식·색깔 등 소재, 틱톡에서 바이럴될 만한 귀여운 훅 포함)",
      "genre_hint": "catchy children song, playful, simple melody, nursery rhyme vibes"},
     {"id": "meme_dance",   "weight": 8,
      "label": "틱톡/릴스 챌린지 밈 댄스곡 (짧고 강렬한 훅, 반복적 안무 구간, 유머러스한 가사)",
      "genre_hint": "viral dance pop, TikTok challenge, catchy hook, fun"},
-    {"id": "workout",      "weight": 6,
+    {"id": "workout",      "weight": 10,   # ↑ 헬스 루틴 = 플레이리스트 저장 → 구독
      "label": "헬스장/운동 하이프 트랙 (빠른 BPM 140+, 강렬한 베이스, 동기부여 가사)",
      "genre_hint": "workout hype, high BPM, motivational, bass-heavy"},
-    {"id": "sleep_calm",   "weight": 4,
+    {"id": "sleep_calm",   "weight": 10,   # ↑ 수면 루틴 = 매일 재방문 → 구독
      "label": "힐링/수면 유도 음악 (ASMR 감성, 부드러운 보컬, 자연 소리 연상)",
      "genre_hint": "healing, sleep music, ambient, soft vocal, peaceful"},
 ]
