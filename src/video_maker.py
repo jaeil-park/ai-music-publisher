@@ -51,19 +51,23 @@ BG_PATH     = DATA_DIR / "background.png"
 OUTPUT_PATH = DATA_DIR / "output_shorts.mp4"
 
 if platform.system() == "Windows":
-    FONT_PATH     = "C:/Windows/Fonts/malgun.ttf"
-    SUBTITLE_FONT = "Malgun Gothic"
+    FONT_PATH = "C:/Windows/Fonts/arial.ttf"
 else:
-    FONT_PATH     = "/usr/share/fonts/truetype/nanum/NanumGothic.ttf"
-    SUBTITLE_FONT = "NanumGothic"
+    FONT_PATH = next(
+        (p for p in (
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+        ) if Path(p).exists()),
+        "",
+    )
+    if not FONT_PATH:
+        logger.warning("No suitable font found — title overlay will be skipped")
 
 FONT_SIZE    = 80
 FONT_COLOR   = "white"
 BORDER_W     = 3
 BORDER_COLOR = "black"
-
-if not Path(FONT_PATH).exists():
-    raise FileNotFoundError(f"폰트 파일을 찾을 수 없습니다: {FONT_PATH}\n해당 경로에 폰트가 설치되어 있는지 확인해주세요.")
 
 # DALL-E 3 세로형 해상도 (유튜브 쇼츠 9:16 비율)
 IMAGE_SIZE  = "1024x1792"
@@ -142,15 +146,7 @@ def make_video(concept: dict, mp3_path: Path) -> Path:
     logger.info("=== 영상 제작 파이프라인 시작 ===")
 
     _generate_background(concept, BG_PATH)
-
-    # Whisper로 가사 자막 생성 (실패해도 영상 합성은 계속)
-    srt_path = _transcribe_to_srt(mp3_path)
-
-    _compose_video(BG_PATH, mp3_path, concept["title"], srt_path, OUTPUT_PATH)
-
-    # SRT 임시 파일 정리
-    if srt_path and srt_path.exists():
-        srt_path.unlink(missing_ok=True)
+    _compose_video(BG_PATH, mp3_path, concept["title"], OUTPUT_PATH)
 
     logger.info("=== 영상 제작 완료: %s ===", OUTPUT_PATH)
     return OUTPUT_PATH
@@ -159,27 +155,12 @@ def make_video(concept: dict, mp3_path: Path) -> Path:
 # ---------------------------------------------------------------------------
 # 내부 헬퍼 함수
 # ---------------------------------------------------------------------------
-def _transcribe_to_srt(mp3_path: Path) -> Path | None:
-    """
-    OpenAI Whisper API로 mp3 → SRT 자막 파일 생성.
-    실패 시 None 반환 (자막 없이 계속 진행).
-    """
-    logger.info("Whisper 자막 생성 시작...")
-    try:
-        client = OpenAI(api_key=OPENAI_API_KEY)
-        with open(mp3_path, "rb") as f:
-            srt_content = client.audio.transcriptions.create(
-                model="whisper-1",
-                file=f,
-                response_format="srt",
-            )
-        srt_path = mp3_path.with_suffix(".srt")
-        srt_path.write_text(srt_content, encoding="utf-8")
-        logger.info("자막 파일 생성 완료: %s", srt_path.name)
-        return srt_path
-    except Exception as e:
-        logger.warning("Whisper 자막 생성 실패 (자막 없이 진행): %s", e)
-        return None
+def _to_ascii_title(title: str) -> str:
+    """Non-ASCII 문자 제거 후 영문/숫자만 남김. 비어 있으면 'Music' 반환."""
+    ascii_only = "".join(c for c in title if ord(c) < 128).strip()
+    # 연속 공백 정리
+    import re
+    return re.sub(r"\s+", " ", ascii_only) or "Music"
 
 
 def _to_ffmpeg_path(path: Path) -> str:
@@ -241,26 +222,24 @@ def _generate_background(concept: dict, out_path: Path) -> Path:
 
 
 @with_retry()
-def _compose_video(bg_path: Path, mp3_path: Path, title: str, srt_path: Path | None, output_path: Path) -> Path:
+def _compose_video(bg_path: Path, mp3_path: Path, title: str, output_path: Path) -> Path:
     """
     FFmpeg로 애니메이션 배경 + mp3를 합성하여 mp4 생성.
 
     배경 효과:
       - 110% 스케일업 후 sin/cos 표류 크롭 (Ken Burns-lite)
-      - GIF 대비 품질 손실 없이 생동감 있는 배경 구현, 인코딩 속도 영향 없음
     레이어:
       - [하] 표류 배경
-      - [중] 제목 drawtext (상단 배치)
-      - [상] Whisper SRT 자막 subtitles 필터 (libass 필요, 실패 시 폴백)
+      - [상] 영문 제목 drawtext (상단, FONT_PATH가 있을 때만)
     """
     logger.info("FFmpeg 합성 시작: %s + %s → %s", bg_path.name, mp3_path.name, output_path.name)
 
-    wrapped_title = textwrap.fill(title, width=14)
+    ascii_title   = _to_ascii_title(title)
+    wrapped_title = textwrap.fill(ascii_title, width=16)
     safe_title    = _escape_drawtext(wrapped_title)
     audio_stream  = ffmpeg.input(str(mp3_path))
 
-    # ── 배경: 110% 확대 후 사인파 표류 (생동감 있는 켄번즈 효과) ──────────
-    # 주기: x ≈ 78초(2π/0.08), y ≈ 105초(2π/0.06) → 시작/끝이 자연스럽게 다름
+    # ── 배경: 110% 확대 후 사인파 표류 (Ken Burns-lite) ──────────────────
     video_bg = (
         ffmpeg.input(str(bg_path), loop=1, framerate=25)
         .filter("scale", _BIG_W, _BIG_H)
@@ -272,24 +251,27 @@ def _compose_video(bg_path: Path, mp3_path: Path, title: str, srt_path: Path | N
         )
     )
 
-    # 제목은 상단 배치 (하단 자막 영역 확보)
-    video_with_title = video_bg.filter(
-        "drawtext",
-        fontfile=FONT_PATH,
-        text=safe_title,
-        fontsize=FONT_SIZE,
-        fontcolor=FONT_COLOR,
-        borderw=BORDER_W,
-        bordercolor=BORDER_COLOR,
-        shadowx=2,
-        shadowy=2,
-        shadowcolor="black",
-        box=1,
-        boxcolor="black@0.5",
-        x="(w-text_w)/2",
-        y="h*0.06",
-        line_spacing=20,
-    )
+    # 영문 제목 오버레이 (폰트 없으면 건너뜀)
+    if FONT_PATH:
+        video_final = video_bg.filter(
+            "drawtext",
+            fontfile=FONT_PATH,
+            text=safe_title,
+            fontsize=FONT_SIZE,
+            fontcolor=FONT_COLOR,
+            borderw=BORDER_W,
+            bordercolor=BORDER_COLOR,
+            shadowx=2,
+            shadowy=2,
+            shadowcolor="black",
+            box=1,
+            boxcolor="black@0.5",
+            x="(w-text_w)/2",
+            y="h*0.06",
+            line_spacing=20,
+        )
+    else:
+        video_final = video_bg
 
     output_kwargs = dict(
         vcodec="libx264",
@@ -299,37 +281,8 @@ def _compose_video(bg_path: Path, mp3_path: Path, title: str, srt_path: Path | N
         shortest=None,
     )
 
-    # Whisper 자막 오버레이 시도 (libass 필요; Ubuntu FFmpeg 기본 포함)
-    if srt_path and srt_path.exists():
-        try:
-            video_with_subs = video_with_title.filter(
-                "subtitles",
-                _to_ffmpeg_path(srt_path),
-                force_style=(
-                    f"FontName={SUBTITLE_FONT},"
-                    "FontSize=20,"
-                    "Bold=1,"
-                    "PrimaryColour=&H00FFFFFF,"
-                    "OutlineColour=&H00000000,"
-                    "Outline=2,"
-                    "Alignment=2,"
-                    "MarginV=80"
-                ),
-            )
-            (
-                ffmpeg.output(video_with_subs, audio_stream, str(output_path), **output_kwargs)
-                .overwrite_output()
-                .run(quiet=True)
-            )
-            logger.info("자막 포함 영상 합성 완료: %s (%.1f MB)", output_path.name, output_path.stat().st_size / (1024 * 1024))
-            return output_path
-        except ffmpeg.Error as e:
-            err = e.stderr.decode(errors="ignore") if e.stderr else str(e)
-            logger.warning("자막 필터 실패 (libass 미지원 가능). 자막 없이 재합성합니다.\n%s", err[:300])
-
-    # 폴백: 자막 없이 합성
     (
-        ffmpeg.output(video_with_title, audio_stream, str(output_path), **output_kwargs)
+        ffmpeg.output(video_final, audio_stream, str(output_path), **output_kwargs)
         .overwrite_output()
         .run(quiet=True)
     )
@@ -356,8 +309,8 @@ if __name__ == "__main__":
     # 테스트용 더미 컨셉
     test_concept = {
         "genre":       "Chillhop, lo-fi jazz",
-        "mood":        "청량한 봄",
-        "title":       "청량한 봄 Chillhop",
+        "mood":        "fresh spring breeze",
+        "title":       "Spring Breeze Chillhop",
         "category_id": "lofi_jazz",
     }
 
