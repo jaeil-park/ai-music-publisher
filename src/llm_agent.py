@@ -22,7 +22,7 @@ CATEGORY_WEIGHTS = {
     "걸그룹 K-POP (아이브/뉴진스 스타일)": 3,
     "보이그룹 K-POP (BTS/세븐틴 스타일)": 3,
     "K-POP 발라드 (드라마 OST 감성)": 3,
-    "K-POP R&B (어반/그루비)": 3,
+    "K-POP R&B (어반/그루비)": 1,
     "모던 트로트 (임영웅/영탁 스타일)": 1,
     "인디 어쿠스틱 (10cm/적재 감성)": 1,
     "인디 밴드 록 (DAY6/CNBLUE 스타일)": 1,
@@ -58,11 +58,11 @@ def generate_daily_concept(ep_number: int) -> dict:
     {{
       "title": "유튜브 쇼츠 영문 제목 (마지막에 #{ep_number} 포함)",
       "description": "유튜브 설명란에 들어갈 간략한 영문 곡 설명 (1~2 문장)",
-      "lyrics": "생성될 노래의 전체 영문 가사 (Verse, Chorus, Bridge 등 구조 포함)",
+      "lyrics": "생성될 노래의 전체 영문 또는 한글(음원에 맞게) 가사 (Verse, Chorus, Bridge 등 구조 포함 띄어쓰기)",
       "tags": ["AImusic", "Shorts", "관련 태그 3개"],
-      "on_screen_text": "영상 중앙에 띄울 짧고 감성적인 한국어 문구 (1~2줄)",
+      "on_screen_text": "영상 가운데 정렬 후 아랫쪽에 띄울 짧고 감성적인 한국어 문구 (1~2줄, 폰트크기 14px로 읽기 쉽게)",
       "audio_prompt": "Stability Audio API용 영문 프롬프트 (2분 30초 길이의 곡. 보컬 특징, 악기, 분위기 쉼표 구분)",
-      "image_prompt": "DALL-E 3 API용 영문 프롬프트 (9:16 비율 세로형 배경, 고화질 텍스트/워터마크 제외)"
+      "image_prompt": "DALL-E 3 API용 영문 프롬프트 (9:16 비율 세로형 배경, 음원 주제에 맞게 퀄리티 높은 고화질 텍스트/워터마크 제외)"
     }}
     """
 
