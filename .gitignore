@@ -1,15 +1,58 @@
-venv/
-.env
-data/
+# --- Python ---
 __pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.venv/
+venv/
+ENV/
+
+# --- Secrets & Config ---
+.env
+client_secrets.json
+token.json
+settings.local.json
+.claude/
+
+# --- Temporary / Data ---
+data/*
+!data/.gitkeep
+temp/
+tmp/
+*.log
+
+# --- Media (Generated) ---
 *.mp3
 *.mp4
 *.srt
 *.png
-.claude/
-.venv/
+*.jpg
+*.jpeg
+*.gif
 
-# 인증 파일 (GitHub Actions에서 시크릿으로 런타임 생성됨)
-client_secrets.json
-token.json
-settings.local.json
+# --- IDEs ---
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# --- Web (Keep specific files for GitHub Pages) ---
+# DO NOT ignore index.html, privacy.html, terms.html, tiktok*.txt
