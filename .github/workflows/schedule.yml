@@ -46,3 +46,19 @@ jobs:
       - name: Run Main Pipeline
         run: |
           python main.py
+
+      - name: Archive Daily Video for Weekly Bundle
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Create weekly-assets release if it doesn't exist
+          gh release view weekly-assets || gh release create weekly-assets --title "Weekly Assets" --notes "Temporary storage for weekly bundle"
+          
+          # Rename output_shorts.mp4 to something unique
+          TIMESTAMP=$(date +'%Y%m%d_%H%M')
+          if [ -f data/output_shorts.mp4 ]; then
+            mv data/output_shorts.mp4 data/music_${TIMESTAMP}.mp4
+            gh release upload weekly-assets data/music_${TIMESTAMP}.mp4 --clobber
+          else
+            echo "No output_shorts.mp4 found."
+          fi
