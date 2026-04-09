@@ -33,8 +33,8 @@ def main():
         
         logger.info("[Step 1] DALL-E 3 배경 이미지 생성 (건너뜀 - 검정색 배경으로 대체)")
 
-        logger.info("[Step 2] Stability Audio 음원 생성")
-        audio_path = generate_and_download_audio(concept["audio_prompt"])
+        logger.info("[Step 2] Suno 음원 생성")
+        audio_path = generate_and_download_audio(concept)
 
         logger.info("[Step 3] FFmpeg 영상 합성")
         mp4_path = make_video(on_screen_text=on_screen_text, audio_path=audio_path)

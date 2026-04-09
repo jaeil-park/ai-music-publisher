@@ -68,9 +68,9 @@ def main():
 
         # [Step 1] DALL-E 3 배경 이미지 생성 (제거됨 - 검은 배경의 오디오 비주얼라이저로 대체)
 
-        # [Step 2] 음원 생성 (Stability Audio API)
-        logger.info("[Step 2] Stability Audio 음원 생성 시작")
-        audio_path = generate_and_download_audio(concept["audio_prompt"])
+        # [Step 2] 음원 생성 (Suno API)
+        logger.info("[Step 2] Suno 음원 생성 시작")
+        audio_path = generate_and_download_audio(concept)
 
         # [Step 3] 영상 합성 (FFmpeg)
         logger.info("[Step 3] FFmpeg 오디오 비주얼라이저 합성 시작")
