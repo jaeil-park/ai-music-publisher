@@ -7,6 +7,7 @@ __pycache__/
 *.srt
 *.png
 .claude/
+.venv/
 
 # 인증 파일 (GitHub Actions에서 시크릿으로 런타임 생성됨)
 client_secrets.json
