@@ -10,10 +10,10 @@ video_maker.py
 
 import os
 import time
+import random
 import logging
 import platform
 import requests
-import textwrap
 from pathlib import Path
 from functools import wraps
 
@@ -60,10 +60,14 @@ else:
     if not FONT_PATH:
         logger.warning("No suitable font found — title overlay will be skipped")
 
-FONT_SIZE    = 80
+FONT_SIZE    = 58          # 80 → 58: 한글 2줄이 1080px 너비에 여유있게 들어가는 크기
 FONT_COLOR   = "white"
-BORDER_W     = 3
+BORDER_W     = 4
 BORDER_COLOR = "black"
+
+# 영상 기준 텍스트 최대 너비 (1080px 기준, 폰트 58px 한글 1글자 ≈ 58px)
+_CHARS_PER_LINE = 12       # 1줄 최대 12글자 (≈ 696px, 여백 충분)
+_MAX_LINES      = 2        # 최대 2줄
 
 MAX_RETRIES = 3
 RETRY_DELAY = 5
@@ -93,13 +97,12 @@ def with_retry(max_retries: int = MAX_RETRIES, delay: int = RETRY_DELAY):
 # ---------------------------------------------------------------------------
 # 공개 진입점
 # ---------------------------------------------------------------------------
-def make_video(on_screen_text: str, image_path: Path, audio_path: Path) -> Path:
+def make_video(on_screen_text: str, audio_path: Path) -> Path:
     """
-    이미지 + 음원 + 중앙 텍스트 자막을 합성하여 mp4 비디오 생성.
+    오디오 주파수 시각화 + 중앙 텍스트 자막을 합성하여 mp4 비디오 생성 (이미지 없음).
 
     Args:
         on_screen_text: 영상 중앙에 들어갈 한국어 감성 자막 텍스트
-        image_path: 생성된 배경 이미지 경로 (9:16)
         audio_path: 생성된 오디오 경로
 
     Returns:
@@ -107,7 +110,7 @@ def make_video(on_screen_text: str, image_path: Path, audio_path: Path) -> Path:
     """
     logger.info("=== 영상 제작 파이프라인 시작 ===")
 
-    _compose_video(image_path, audio_path, on_screen_text, OUTPUT_PATH)
+    _compose_video(audio_path, on_screen_text, OUTPUT_PATH)
 
     logger.info("=== 영상 제작 완료: %s ===", OUTPUT_PATH)
     return OUTPUT_PATH
@@ -117,44 +120,87 @@ def make_video(on_screen_text: str, image_path: Path, audio_path: Path) -> Path:
 # 내부 헬퍼 함수
 # ---------------------------------------------------------------------------
 @with_retry()
-def _compose_video(bg_path: Path, audio_path: Path, on_screen_text: str, output_path: Path) -> Path:
+def _compose_video(audio_path: Path, on_screen_text: str, output_path: Path) -> Path:
     """
-    FFmpeg로 배경 이미지(Ken Burns 애니메이션), 오디오, 중앙 텍스트를 합성하여 mp4 생성.
+    FFmpeg로 오디오 주파수 바(showfreqs) + 텍스트를 합성하여 mp4 생성.
+    
+    레이아웃 (세로 1920px 기준):
+        - 0 ~ 1920px  : 검은색 배경
+        - y=460 ~ 1460 : 대형 화면 중앙 오디오 주파수 바
+        - y≈1620~1750 : 감성 텍스트
     """
-    logger.info("FFmpeg 합성 시작: %s + %s → %s", bg_path.name, audio_path.name, output_path.name)
+    logger.info("FFmpeg 합성 시작 (오디오 단독 렌더링): %s → %s", audio_path.name, output_path.name)
 
-    wrapped_text  = textwrap.fill(on_screen_text, width=20)
-    safe_text     = _escape_drawtext(wrapped_text)
-    audio_stream  = ffmpeg.input(str(audio_path))
+    audio_in = ffmpeg.input(str(audio_path))
 
     _OUT_W, _OUT_H = 1080, 1920
-    _BIG_W, _BIG_H = 1188, 2112          # 출력 해상도보다 10% 크게
-    _DRIFT_X = (_BIG_W - _OUT_W) // 2
-    _DRIFT_Y = (_BIG_H - _OUT_H) // 2
 
-    # ── 배경: 110% 확대 후 사인파 표류 (Ken Burns 애니메이션 효과) ──
-    video_bg = (
-        ffmpeg.input(str(bg_path), loop=1, framerate=25)
-        .filter("scale", _BIG_W, _BIG_H)
-        .filter(
-            "crop",
-            _OUT_W, _OUT_H,
-            f"{_DRIFT_X}+{_DRIFT_X // 2}*sin(t*0.05)",
-            f"{_DRIFT_Y}+{_DRIFT_Y // 2}*cos(t*0.03)",
+    # ── 오디오 주파수 바 시각화 (화면 중앙에 큼직하게 배치) ──
+    _VIS_W  = 1000
+    _VIS_H  = 1000
+    _VIS_X  = 40
+    _VIS_Y  = 460
+
+    # ── 다양한 시각화 연출을 위한 4가지 모드 랜덤 선택 ──
+    vis_modes = ["freq_bar", "freq_line", "waves", "cqt"]
+    vis_mode = random.choice(vis_modes)
+
+    # 10단계 무지개 그라데이션
+    rainbow_colors = "0xFF0000|0xFF7F00|0xFFFF00|0x7FFF00|0x00FF00|0x00FF7F|0x00FFFF|0x0000FF|0x7F00FF|0xFF00FF"
+
+    if vis_mode == "freq_bar":
+        # 1. 10색 무지개 막대 이퀄라이저
+        visualizer = audio_in.filter(
+            "showfreqs", size=f"{_VIS_W}x{_VIS_H}", rate=25, mode="bar", ascale="log",
+            fscale=random.choice(["lin", "log"]), win_size=2048, averaging=2, colors=rainbow_colors
         )
-    )
+    elif vis_mode == "freq_line":
+        # 2. 부드러운 오션 웨이브풍 라인 스펙트럼
+        visualizer = audio_in.filter(
+            "showfreqs", size=f"{_VIS_W}x{_VIS_H}", rate=25, mode="line", ascale="log",
+            fscale="log", win_size=2048, averaging=2, colors=rainbow_colors
+        )
+    elif vis_mode == "waves":
+        # 3. 심장 박동 파형 스타일
+        visualizer = audio_in.filter(
+            "showwaves", size=f"{_VIS_W}x{_VIS_H}", rate=25, mode="cline",
+            colors=rainbow_colors
+        )
+    else:  # cqt
+        # 4. 음악 피아노 음계 컬러 스펙트럼
+        visualizer = audio_in.filter(
+            "showcqt", size=f"{_VIS_W}x{_VIS_H}", fps=25
+        )
 
-    # 중앙 감성 텍스트 오버레이
-    video_final = video_bg
-    if FONT_PATH and wrapped_text:
-        lines = wrapped_text.split('\n')
-        num_lines = len(lines)
-        line_height = FONT_SIZE + 20  # 폰트 크기 + 줄 간격
-        total_text_height = num_lines * line_height - 20
+    # 시각화 화면을 검은 배경 위에 올리기 (크기 매칭)
+    vis_padded = visualizer.filter("pad", _OUT_W, _OUT_H, x=_VIS_X, y=_VIS_Y, color="black")
+
+    # 투명도 혼합이나 블렌드 없이 덮어씌움 (어차피 패딩외곽이 검정이므로 그대로 사용가능)
+    video_with_vis = vis_padded
+
+    # ── 텍스트 오버레이 (주파수 바 아래) ──
+    video_final = video_with_vis
+    if FONT_PATH and on_screen_text:
+        lines_raw = on_screen_text.split('\n')
+        lines = []
+        for raw in lines_raw:
+            while len(raw) > _CHARS_PER_LINE:
+                lines.append(raw[:_CHARS_PER_LINE])
+                raw = raw[_CHARS_PER_LINE:]
+            if raw:
+                lines.append(raw)
+        lines = lines[:_MAX_LINES]
+
+        num_lines    = len(lines)
+        line_height  = FONT_SIZE + 16
+        total_height = num_lines * line_height - 16
+
+        # 텍스트: 주파수 바 하단(y≈1560)에서 40px 아래 시작
+        block_top = _VIS_Y + _VIS_H + 40
 
         for i, line in enumerate(lines):
             safe_line = _escape_drawtext(line)
-            y_pos = f"(h - {total_text_height})/2 + {i * line_height}"
+            y_pos = block_top + i * line_height
             video_final = video_final.filter(
                 "drawtext",
                 fontfile=FONT_PATH,
@@ -164,7 +210,7 @@ def _compose_video(bg_path: Path, audio_path: Path, on_screen_text: str, output_
                 borderw=BORDER_W,
                 bordercolor=BORDER_COLOR,
                 x="(w-text_w)/2",
-                y=y_pos,
+                y=str(y_pos),
             )
 
     output_kwargs = dict(
@@ -172,11 +218,11 @@ def _compose_video(bg_path: Path, audio_path: Path, on_screen_text: str, output_
         acodec="aac",
         audio_bitrate="192k",
         pix_fmt="yuv420p",
-        shortest=None, # 음원 길이에 맞춰 영상 종료 (최대 3분)
+        shortest=None,
     )
 
     (
-        ffmpeg.output(video_final, audio_stream, str(output_path), **output_kwargs)
+        ffmpeg.output(video_final, audio_in, str(output_path), **output_kwargs)
         .overwrite_output()
         .run(quiet=True)
     )

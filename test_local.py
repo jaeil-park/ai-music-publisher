@@ -20,9 +20,7 @@ logger = logging.getLogger("test_local")
 
 from src.llm_agent import generate_daily_concept
 from src.media_generator import generate_and_download_audio
-from src.dalle_vision import generate_background_image
 from src.video_maker import make_video
-
 def main():
     logger.info("========== [로컬 테스트] AI Music 파이프라인 가동 (업로드 제외) ==========")
 
@@ -33,14 +31,13 @@ def main():
         concept = generate_daily_concept(ep_number=ep)
         on_screen_text = concept.get("on_screen_text", "AI Music Test")
         
-        logger.info("[Step 1] DALL-E 3 배경 이미지 생성")
-        image_path = generate_background_image(concept["image_prompt"])
+        logger.info("[Step 1] DALL-E 3 배경 이미지 생성 (건너뜀 - 검정색 배경으로 대체)")
 
         logger.info("[Step 2] Stability Audio 음원 생성")
         audio_path = generate_and_download_audio(concept["audio_prompt"])
 
         logger.info("[Step 3] FFmpeg 영상 합성")
-        mp4_path = make_video(on_screen_text=on_screen_text, image_path=image_path, audio_path=audio_path)
+        mp4_path = make_video(on_screen_text=on_screen_text, audio_path=audio_path)
 
         logger.info("========== 🎉 로컬 테스트 완료! ==========")
         logger.info("최종 생성된 영상 위치: %s", mp4_path)

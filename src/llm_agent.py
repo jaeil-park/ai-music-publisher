@@ -51,18 +51,23 @@ def generate_daily_concept(ep_number: int) -> dict:
     
     logger.info("오늘의 선정 카테고리: %s", category)
 
+    # K-POP 계열 카테고리에 한국어 보컬 명시 힌트 추가
+    kpop_hint = ""
+    if any(k in category for k in ["K-POP", "트로트", "인디", "힙합", "틱톡", "어린이"]):
+        kpop_hint = "\n    [중요] audio_prompt에 반드시 'Korean female/male vocalist', 'K-POP style vocal', 'Korean lyrics' 표현을 포함하세요."
+
     system_prompt = "당신은 숏폼 콘텐츠를 기획하는 전문 AI 디렉터입니다. 반드시 유효한 JSON 형식으로 응답하세요."
     user_prompt = f"""
-    오늘의 테마는 '{category}' 입니다. 아래 JSON 스키마로 기획안을 작성해주세요.
+    오늘의 테마는 '{category}' 입니다. 아래 JSON 스키마로 기획안을 작성해주세요.{kpop_hint}
     
     {{
       "title": "유튜브 쇼츠 영문 제목 (마지막에 #{ep_number} 포함)",
       "description": "유튜브 설명란에 들어갈 간략한 영문 곡 설명 (1~2 문장)",
-      "lyrics": "생성될 노래의 전체 영문 또는 한글(음원에 맞게) 가사 (Verse, Chorus, Bridge 등 구조 포함 띄어쓰기)",
+      "lyrics": "생성될 노래의 전체 가사 (Verse, Chorus, Bridge 구조 포함, 카테고리가 K-POP·트로트·인디 계열이면 한국어 가사)",
       "tags": ["AImusic", "Shorts", "관련 태그 3개"],
-      "on_screen_text": "영상 가운데 정렬 후 아랫쪽에 띄울 짧고 감성적인 한국어 문구 (1~2줄, 폰트크기 14px로 읽기 쉽게)",
-      "audio_prompt": "Stability Audio API용 영문 프롬프트 (2분 30초 길이의 곡. 보컬 특징, 악기, 분위기 쉼표 구분)",
-      "image_prompt": "DALL-E 3 API용 영문 프롬프트 (9:16 비율 세로형 배경, 음원 주제에 맞게 퀄리티 높은 고화질 텍스트/워터마크 제외)"
+      "on_screen_text": "영상 화면에 오버레이할 짧고 감성적인 한국어 문구. 반드시 한 줄당 8자 이내, 최대 2줄 (예: '봄날의 설렘' 또는 '지금 이 순간\\n너와 함께')",
+      "audio_prompt": "Stability Audio API용 영문 프롬프트 (2분 30초 길이의 곡. 아래 요소를 반드시 명시: 보컬 성별/언어/스타일, 장르, BPM, 주요 악기, 분위기. 쉼표로 구분)",
+      "image_prompt": "DALL-E 3 API용 영문 프롬프트 (9:16 비율 세로형 배경. 반드시 사물/인물이 아닌 음악에 어울리는 '몽환적, 환상적, 추상적(Dreamy, Abstract, Synesthesia)' 느낌의 시각화 아트로 묘사할 것. 고화질, 텍스트/워터마크/로고 절대 금지)"
     }}
     """
 

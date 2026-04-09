@@ -25,7 +25,6 @@ logger = logging.getLogger("main")
 # 각 단계 모듈 임포트
 from src.llm_agent import generate_daily_concept
 from src.media_generator import generate_and_download_audio
-from src.dalle_vision import generate_background_image # DALL-E 모듈 재활성화
 from src.video_maker import make_video
 from src.uploader import upload_to_youtube
 from src.uploader_tiktok import upload_to_tiktok
@@ -67,17 +66,15 @@ def main():
         if "Shorts" not in tags:
             tags.append("Shorts")
 
-        # [Step 1] 배경 이미지 생성 (DALL-E 3)
-        logger.info("[Step 1] DALL-E 3 9:16 배경 이미지 생성 시작")
-        image_path = generate_background_image(concept["image_prompt"])
+        # [Step 1] DALL-E 3 배경 이미지 생성 (제거됨 - 검은 배경의 오디오 비주얼라이저로 대체)
 
         # [Step 2] 음원 생성 (Stability Audio API)
         logger.info("[Step 2] Stability Audio 음원 생성 시작")
         audio_path = generate_and_download_audio(concept["audio_prompt"])
 
         # [Step 3] 영상 합성 (FFmpeg)
-        logger.info("[Step 3] FFmpeg 쇼츠 영상 중앙 자막 합성 시작")
-        mp4_path = make_video(on_screen_text=on_screen_text, image_path=image_path, audio_path=audio_path)
+        logger.info("[Step 3] FFmpeg 오디오 비주얼라이저 합성 시작")
+        mp4_path = make_video(on_screen_text=on_screen_text, audio_path=audio_path)
 
         # [Step 4] 유튜브 쇼츠 업로드
         logger.info("[Step 4] YouTube Data API를 통한 쇼츠 업로드 시작")
@@ -97,7 +94,6 @@ def main():
             description=final_description,
             tags=tags,
             privacy_status="public",
-            thumbnail_path=str(image_path)
         )
         logger.info("유튜브 업로드 성공! Video URL: https://youtu.be/%s", video_id)
 
@@ -121,9 +117,6 @@ def main():
         logger.info("[Step 7] 임시 파일 정리 및 아카이빙")
         if audio_path.exists():
             shutil.move(str(audio_path), str(ARCHIVE_DIR / audio_path.name))
-        
-        if image_path.exists():
-            shutil.move(str(image_path), str(ARCHIVE_DIR / image_path.name))
 
         logger.info("========== 🚀 모든 파이프라인이 성공적으로 완료되었습니다 ==========")
         
