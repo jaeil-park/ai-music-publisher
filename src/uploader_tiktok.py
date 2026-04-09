@@ -222,21 +222,26 @@ def _init_file_upload(video_path: str, title: str) -> tuple[str, str, int]:
     publish_id = data["data"]["publish_id"]
     upload_url = data["data"]["upload_url"]
     logger.info("업로드 초기화 완료. publish_id: %s", publish_id)
-    return publish_id, upload_url, chunk_size
+    return publish_id, upload_url, chunk_size, total_chunk_count
 
 # ---------------------------------------------------------------------------
 # Step 2: 영상 청크 업로드
 # ---------------------------------------------------------------------------
-def _upload_chunks(video_path: str, upload_url: str, chunk_size: int):
-    """영상을 chunk_size 단위로 분할하여 TikTok 서버에 업로드."""
+def _upload_chunks(video_path: str, upload_url: str, chunk_size: int, total_chunks: int):
+    """영상을 초기화 때 정해진 청크 개수만큼 분할하여 TikTok 서버에 업로드."""
     video_size = os.path.getsize(video_path)
-    total_chunks = math.ceil(video_size / chunk_size)
 
     with open(video_path, "rb") as f:
         for chunk_idx in range(total_chunks):
             start = chunk_idx * chunk_size
-            chunk = f.read(chunk_size)
-            end   = start + len(chunk) - 1
+            
+            # 마지막 청크는 남은 모든 바이트를 포함해야 함 (TikTok 권장사항)
+            if chunk_idx == total_chunks - 1:
+                chunk = f.read()
+            else:
+                chunk = f.read(chunk_size)
+                
+            end = start + len(chunk) - 1
 
             headers = {
                 "Content-Range":  f"bytes {start}-{end}/{video_size}",
@@ -266,19 +271,22 @@ def _wait_for_publish(publish_id: str):
     logger.info("TikTok 게시 완료 대기 중... (최대 %d초)", POLL_TIMEOUT)
 
     while elapsed < POLL_TIMEOUT:
-        resp = requests.post(url, json=payload, headers=_auth_headers(), timeout=15)
-        resp.raise_for_status()
+        try:
+            resp = requests.post(url, json=payload, headers=_auth_headers(), timeout=15)
+            resp.raise_for_status()
 
-        data   = resp.json()
-        status = data.get("data", {}).get("status", "UNKNOWN")
-        logger.info("TikTok 게시 상태: %s (%d초 경과)", status, elapsed)
+            data   = resp.json()
+            status = data.get("data", {}).get("status", "UNKNOWN")
+            logger.info("TikTok 게시 상태: %s (%d초 경과)", status, elapsed)
 
-        if status == "PUBLISH_COMPLETE":
-            logger.info("TikTok 게시 완료!")
-            return
-        elif status == "FAILED":
-            fail_reason = data.get("data", {}).get("fail_reason", "알 수 없음")
-            raise RuntimeError(f"TikTok 게시 실패. 이유: {fail_reason}")
+            if status == "PUBLISH_COMPLETE":
+                logger.info("TikTok 게시 완료!")
+                return
+            elif status == "FAILED":
+                fail_reason = data.get("data", {}).get("fail_reason", "알 수 없음")
+                raise RuntimeError(f"TikTok 게시 실패. 이유: {fail_reason}")
+        except Exception as e:
+            logger.warning("상태 조회 중 오류 (무시하고 계속): %s", e)
 
         time.sleep(POLL_INTERVAL)
         elapsed += POLL_INTERVAL
@@ -304,11 +312,11 @@ def upload_to_tiktok(video_path: str, title: str) -> str:
 
     # Step 1: 게시 초기화
     logger.info("[TT Step 1] TikTok 업로드 초기화 중...")
-    publish_id, upload_url, chunk_size = _init_file_upload(video_path, title)
+    publish_id, upload_url, chunk_size, total_chunks = _init_file_upload(video_path, title)
 
     # Step 2: 청크 업로드
     logger.info("[TT Step 2] 영상 청크 업로드 중...")
-    _upload_chunks(video_path, upload_url, chunk_size)
+    _upload_chunks(video_path, upload_url, chunk_size, total_chunks)
 
     # Step 3: 게시 완료 대기
     logger.info("[TT Step 3] TikTok 게시 완료 대기 중...")
