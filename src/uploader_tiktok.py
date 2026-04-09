@@ -165,20 +165,20 @@ def _init_file_upload(video_path: str, title: str) -> tuple[str, str, int]:
 
     # TikTok rejects multi-chunk uploads for small files.
     # Use a single chunk whenever the file fits within 64 MB.
-    MAX_SINGLE_CHUNK = 50 * 1024 * 1024 # 50MB 이하일 때는 통째로
+    MAX_SINGLE_CHUNK = 50 * 1024 * 1024 # 50MB 이하일 때는 통째로 (1개 청크)
     if video_size <= MAX_SINGLE_CHUNK:
         chunk_size        = video_size
         total_chunk_count = 1
     else:
-        # TikTok Content Posting API chunk calculation bug mitigation:
-        # Instead of fixed chunk size, define target total chunks and calculate chunk size.
-        # Ensure chunk_size is between 5MB and 64MB. We will use exactly 4 chunks for ~100MB files.
-        total_chunk_count = 4
-        chunk_size        = math.ceil(video_size / total_chunk_count)
-        # 그래도 5MB 미만이면 5MB로 교정하고 total_chunk_count 재계산
-        if chunk_size < 5 * 1024 * 1024:
-            chunk_size = 5 * 1024 * 1024
-            total_chunk_count = math.ceil(video_size / chunk_size)
+        # TikTok Content Posting API chunk calculation formula:
+        # total_chunk_count = floor(video_size / chunk_size)
+        # To make this robust, we pick a fixed chunk_size (32MB) and calculate the count.
+        chunk_size = 32 * 1024 * 1024
+        total_chunk_count = math.floor(video_size / chunk_size)
+        
+        # Ensure at least 1 chunk (though size logic above handles this)
+        if total_chunk_count == 0:
+            total_chunk_count = 1
 
     url     = f"{TIKTOK_API_BASE}/post/publish/video/init/"
     headers = _auth_headers()

@@ -6,11 +6,12 @@ on:
     - cron: '0 0,9 * * *'
   workflow_dispatch: # GitHub 페이지에서 수동으로 실행 버튼 활성화
 
+permissions:
+  contents: write
+
 jobs:
   run-pipeline:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
