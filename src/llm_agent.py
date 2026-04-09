@@ -63,7 +63,7 @@ def generate_daily_concept(ep_number: int) -> dict:
     {{
       "title": "유튜브 쇼츠 영문 제목 (마지막에 #{ep_number} 포함)",
       "description": "유튜브 설명란에 들어갈 간략한 영문 곡 설명 (1~2 문장)",
-      "lyrics": "생성될 노래의 전체 가사 (Verse, Chorus, Bridge 구조 포함, 카테고리가 K-POP·트로트·인디 계열이면 한국어 가사)",
+      "lyrics": "생성될 노래의 전체 가사 (음원의 길이가 2분 30초 이상이 되도록 [Verse 1], [Pre-Chorus], [Chorus], [Verse 2], [Pre-Chorus], [Chorus], [Bridge], [Guitar Solo], [Chorus], [Outro] 등 최소 8개 이상의 구조를 갖춘 매우 길고 풍부한 분량으로 작성. K-POP·트로트·인디 계열이면 한국어 가사)",
       "tags": ["AImusic", "Shorts", "관련 태그 3개"],
       "on_screen_text": "영상 화면에 오버레이할 짧고 감성적인 한국어 문구. 반드시 한 줄당 8자 이내, 최대 2줄 (예: '봄날의 설렘' 또는 '지금 이 순간\\n너와 함께')",
       "audio_prompt": "Stability Audio API용 영문 프롬프트 (2분 30초 길이의 곡. 아래 요소를 반드시 명시: 보컬 성별/언어/스타일, 장르, BPM, 주요 악기, 분위기. 쉼표로 구분)",
