@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Music Publisher - Weekly Best Music</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #0a0a0c;
+            --card: #16161a;
+            --accent: #ff0050; /* TikTok Pink */
+            --accent-blue: #00f2ea; /* TikTok Blue */
+            --text: #ffffff;
+            --text-dim: #a0a0a5;
+        }
+        body {
+            background-color: var(--bg);
+            color: var(--text);
+            font-family: 'Outfit', sans-serif;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            text-align: center;
+        }
+        .container {
+            max-width: 600px;
+            padding: 40px;
+            background: var(--card);
+            border-radius: 24px;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+            border: 1px solid rgba(255,255,255,0.05);
+        }
+        h1 {
+            font-size: 2.5rem;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(45deg, var(--accent), var(--accent-blue));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        p {
+            color: var(--text-dim);
+            line-height: 1.6;
+            font-size: 1.1rem;
+        }
+        .footer-links {
+            margin-top: 30px;
+            display: flex;
+            gap: 20px;
+            justify-content: center;
+        }
+        a {
+            color: var(--accent-blue);
+            text-decoration: none;
+            font-weight: 500;
+            transition: 0.3s;
+        }
+        a:hover {
+            color: var(--accent);
+            text-shadow: 0 0 10px var(--accent);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>AI Music Publisher</h1>
+        <p>매일 새롭게 탄생하는 AI 감성 음악.<br>당신의 하루를 채우는 가장 트렌디한 선율을 만나보세요.</p>
+        <div class="footer-links">
+            <a href="privacy.html">Privacy Policy</a>
+            <a href="terms.html">Terms of Service</a>
+        </div>
+    </div>
+</body>
+</html>
