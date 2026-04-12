@@ -58,9 +58,7 @@ REQUESTS_IMPERSONATE = "chrome131"
 # Suno 인증 관리
 # ---------------------------------------------------------------------------
 _SUNO_HEADERS = {
-    # curl_cffi impersonation이 UA·sec-ch-ua·accept-* 를 자동 설정하므로 생략.
-    # 브라우저 캡처 기준 app-specific 헤더만 명시.
-    "User-Agent":        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "User-Agent":        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
     "Origin":            "https://suno.com",
     "Referer":           "https://suno.com/",
     "Sec-Fetch-Site":    "same-site",
@@ -68,6 +66,9 @@ _SUNO_HEADERS = {
     "Sec-Fetch-Dest":    "empty",
     "Accept":            "*/*",
     "Accept-Language":   "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+    "sec-ch-ua":         '"Google Chrome";v="147", "Not.A/Brand";v="8", "Chromium";v="147"',
+    "sec-ch-ua-mobile":  "?0",
+    "sec-ch-ua-platform": '"Windows"',
 }
 
 
@@ -153,6 +154,7 @@ class SunoCookie:
         """
         logger.info("POST /touch를 통해 최신 JWT(sid 포함)를 발급받습니다...")
         self.refresh_token()
+        save_updated_cookie_to_env()
 
     def refresh_token(self):
         """
@@ -243,6 +245,7 @@ class SunoCookie:
             raise ValueError(f"JWT 발급 실패. /touch: {r2.status_code}")
 
         self._token = token
+        save_updated_cookie_to_env()
 
         # JWT 디코딩 → kid·aud·만료 검증 (브라우저 캡처 확인: sid 클레임 없는 것이 정상)
         try:
@@ -311,6 +314,7 @@ def _keep_alive(suno_cookie: SunoCookie):
         time.sleep(TOKEN_REFRESH_INTERVAL)
         try:
             suno_cookie.refresh_token()
+            save_updated_cookie_to_env()
         except Exception as e:
             logger.error("백그라운드 토큰 갱신 실패: %s", e)
 
@@ -409,16 +413,12 @@ def generate_and_download_audio(concept: dict) -> Path:
 # 내부 헬퍼 함수들
 # ---------------------------------------------------------------------------
 def _suno_headers() -> dict:
-    """매 요청마다 fresh browser-token을 포함한 인증 헤더 반환.
-
-    브라우저 네트워크 캡처(2026-03-29) 결과:
-    - studio-api-prod.suno.com으로의 요청에 Cookie 헤더 없음.
-      (브라우저는 credentials: omit으로 CORS 요청 → 쿠키 미전송)
-    - Authorization: Bearer + browser-token + device-id 만 전송.
-    """
+    """매 요청마다 fresh browser-token 및 전체 쿠키를 포함한 인증 헤더 반환."""
     token = suno_auth.get_token()
     return {
+        **_SUNO_HEADERS,
         "Authorization": f"Bearer {token}",
+        "Cookie":        suno_auth.get_cookie_string(),
         "browser-token": _make_browser_token(),
         "device-id":     suno_auth.device_id,
     }

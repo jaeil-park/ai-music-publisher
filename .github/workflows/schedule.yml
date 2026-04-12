@@ -65,3 +65,16 @@ jobs:
           else
             echo "No output_shorts.mp4 found."
           fi
+
+      - name: Update Env Secret (Session Persistence)
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -f .env ]; then
+            # .env 파일에 갱신된 SUNO_COOKIE가 포함되어 있으므로 이를 GitHub Secrets에 다시 저장합니다.
+            # GITHUB_TOKEN이 secrets:write 권한이 없을 경우 GH_PAT를 설정해야 할 수도 있습니다.
+            gh secret set ENV_FILE < .env
+            echo "Successfully updated ENV_FILE secret."
+          else
+            echo ".env file not found, skipping secret update."
+          fi
