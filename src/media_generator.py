@@ -49,23 +49,23 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 _COOKIE_STR    = os.getenv("SUNO_COOKIE")
 
 SUNO_BASE_URL        = os.getenv("SUNO_BASE_URL", "https://studio-api-prod.suno.com/api")
+SUNO_CAPTCHA_TOKEN   = os.getenv("SUNO_CAPTCHA_TOKEN")
 CLERK_JS_VERSION     = "5.117.0"
 CLERK_API_VERSION    = "2025-11-10"
-REQUESTS_IMPERSONATE = "chrome131"
+REQUESTS_IMPERSONATE = "chrome124"
 
+TWOCAPTCHA_API_KEY   = os.getenv("TWOCAPTCHA_API_KEY")
+SUNO_SITEKEY         = os.getenv("SUNO_SITEKEY", "0x4AAAAAAARdAuciFArNCYVG")
 
 # ---------------------------------------------------------------------------
 # Suno 인증 관리
 # ---------------------------------------------------------------------------
 _SUNO_HEADERS = {
-    "User-Agent":        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
     "Origin":            "https://suno.com",
     "Referer":           "https://suno.com/",
-    "Sec-Fetch-Site":    "same-site",
-    "Sec-Fetch-Mode":    "cors",
-    "Sec-Fetch-Dest":    "empty",
-    "Accept":            "*/*",
+    "Accept":            "application/json, text/plain, */*",
     "Accept-Language":   "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+    "User-Agent":        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
     "sec-ch-ua":         '"Google Chrome";v="147", "Not.A/Brand";v="8", "Chromium";v="147"',
     "sec-ch-ua-mobile":  "?0",
     "sec-ch-ua-platform": '"Windows"',
@@ -101,10 +101,23 @@ class SunoCookie:
 
     @property
     def session_id(self) -> str | None:
-        """clerk_active_context 쿠키 → Clerk session ID."""
+        """clerk_active_context 쿠키 또는 JWT의 sid 클레임에서 Clerk session ID 추출."""
         raw = self._get("clerk_active_context")
         if raw:
-            return raw.rstrip(":")  # 'session_xxx:' → 'session_xxx'
+            return raw.rstrip(":")
+            
+        # 쿠키에 없으면 JWT payload에서 sid 추출 시도
+        if self._token:
+            try:
+                def _decode_b64(s: str) -> dict:
+                    s = s + "=" * ((4 - len(s) % 4) % 4)
+                    return json.loads(base64.urlsafe_b64decode(s).decode())
+                parts = self._token.split(".")
+                if len(parts) >= 2:
+                    payload = _decode_b64(parts[1])
+                    return payload.get("sid")
+            except:
+                pass
         return None
 
     @property
@@ -126,22 +139,49 @@ class SunoCookie:
             new_parts.append(f" {name}={value}")
         self._raw = ";".join(new_parts)
 
-    def get_cookie_string(self) -> str:
-        """현재 갱신된 JWT 토큰이 반영된 최신 쿠키 문자열 반환."""
-        if not self._token:
-            return self._raw
+    def get_cookie_string(self, include_session: bool = True) -> str:
+        """현재 갱신된 JWT 토큰 및 Clerk 쿠키가 반영된 최신 쿠키 문자열 반환."""
         parts = self._raw.split(";")
         new_parts = []
-        found = False
+        found_session = False
+        
         for p in parts:
-            if p.strip().startswith("__session="):
-                new_parts.append(f" __session={self._token}" if new_parts else f"__session={self._token}")
-                found = True
+            p = p.strip()
+            if not p: continue
+            name = p.split("=")[0]
+            
+            # __session은 가변적이므로 따로 처리
+            if name == "__session":
+                if include_session and self._token:
+                    new_parts.append(f"__session={self._token}")
+                found_session = True
             else:
                 new_parts.append(p)
-        if not found:
-            new_parts.append(f" __session={self._token}")
-        return ";".join(new_parts)
+        
+        if include_session and not found_session and self._token:
+            new_parts.append(f"__session={self._token}")
+            
+        return "; ".join(new_parts)
+
+    def _sync_clerk_cookies(self, set_cookie_header: str | list[str] | None):
+        """서버의 Set-Cookie 헤더에서 모든 __client 계열 쿠키를 추출해 _raw에 동기화."""
+        if not set_cookie_header:
+            return
+            
+        if isinstance(set_cookie_header, str):
+            set_cookie_header = [set_cookie_header]
+            
+        updated = False
+        for cookie_line in set_cookie_header:
+            m = re.search(r'(__client[^=]*)=([^;,\s]+)', cookie_line)
+            if m:
+                name, val = m.group(1), m.group(2)
+                self._update_raw_cookie(name, val)
+                updated = True
+                logger.info("Clerk 쿠키 동기화됨: %s", name)
+        
+        if updated:
+            save_updated_cookie_to_env()
 
     def load_initial_token(self):
         """
@@ -165,11 +205,10 @@ class SunoCookie:
           2) POST /touch/{session_id} → sid 포함 최신 JWT 발급 (브라우저와 동일한 방식)
           3) /touch 실패 시 POST /tokens 폴백
         """
-        client = self.client_cookie
-        if not client:
-            raise ValueError("__client 쿠키가 없습니다. SUNO_COOKIE를 브라우저에서 갱신하세요.")
-
-        auth_headers = {**_SUNO_HEADERS, "Cookie": f"__client={client}"}
+        # Clerk 호출 시에도 가급적 전체 쿠키(context)를 실어 보냄
+        # 단, __session은 제외 (있을 경우 간섭 가능성)
+        clerk_cookie_str = self.get_cookie_string(include_session=False)
+        auth_headers = {**_SUNO_HEADERS, "Cookie": clerk_cookie_str}
         qs           = f"__clerk_api_version={CLERK_API_VERSION}&_clerk_js_version={CLERK_JS_VERSION}"
 
         # Step 1: session_id 및 세션 상태 확인
@@ -183,12 +222,11 @@ class SunoCookie:
             logger.error("Clerk GET /v1/client 실패 %d: %s", r1.status_code, r1.text[:300])
             r1.raise_for_status()
 
-        # Clerk가 Set-Cookie로 새 __client를 발급하면 즉시 갱신 후 auth_headers도 업데이트
-        m = re.search(r'__client=([^;,\s]+)', r1.headers.get("set-cookie", ""))
-        if m:
-            self._update_raw_cookie("__client", m.group(1))
-            auth_headers = {**_SUNO_HEADERS, "Cookie": f"__client={self.client_cookie}"}
-            logger.info("__client 쿠키 자동 갱신됨 (Clerk Set-Cookie).")
+        # Set-Cookie에 포함된 모든 __client 계열 쿠키 동기화
+        self._sync_clerk_cookies(r1.headers.get_list("set-cookie") if hasattr(r1.headers, "get_list") else r1.headers.get("set-cookie"))
+        
+        # 갱신된 쿠키로 헤더 업데이트
+        auth_headers["Cookie"] = self.get_cookie_string(include_session=False)
 
         data     = r1.json()
         sessions = (
@@ -215,11 +253,12 @@ class SunoCookie:
         token = None
         r2 = requests.post(
             f"https://auth.suno.com/v1/client/sessions/{session_id}/touch?{qs}",
-            headers={**auth_headers, "Content-Length": "0"},
+            headers={**auth_headers, "Content-Type": "application/x-www-form-urlencoded", "Content-Length": "0"},
             impersonate=REQUESTS_IMPERSONATE,
             timeout=15,
         )
         if r2.ok:
+            self._sync_clerk_cookies(r2.headers.get_list("set-cookie") if hasattr(r2.headers, "get_list") else r2.headers.get("set-cookie"))
             td = r2.json()
             # response.last_active_token.jwt 우선, 없으면 client.sessions[0].last_active_token.jwt
             session_obj = td.get("response") or td.get("client", {}).get("sessions", [{}])[0]
@@ -325,6 +364,110 @@ def _start_keep_alive(suno_cookie: SunoCookie):
     logger.info("토큰 갱신 스레드 시작 (주기: %d초).", TOKEN_REFRESH_INTERVAL)
 
 
+def _solve_captcha_2captcha() -> str | None:
+    """2Captcha API를 사용하여 Suno.com의 Turnstile CAPTCHA를 자동으로 해결합니다."""
+    if not TWOCAPTCHA_API_KEY:
+        return None
+        
+    logger.info("2Captcha를 사용하여 Turnstile CAPTCHA 우회 시도 중...")
+    try:
+        import requests as std_requests # 2captcha 통신용 표준 requests
+        
+        # 1. 태스크 생성
+        create_payload = {
+            "clientKey": TWOCAPTCHA_API_KEY,
+            "task": {
+                "type": "TurnstileTaskProxyless",
+                "websiteURL": "https://suno.com",
+                "websiteKey": SUNO_SITEKEY,
+                "action": "heartbeat"
+            }
+        }
+        res = std_requests.post("https://api.2captcha.com/createTask", json=create_payload, timeout=15)
+        res_data = res.json()
+        
+        if res_data.get("errorId") != 0:
+            logger.error("2Captcha 태스크 생성 실패: %s", res_data)
+            return None
+            
+        task_id = res_data.get("taskId")
+        logger.info("2Captcha 태스크 생성됨 (taskId: %s). 해결 대기 중...", task_id)
+        
+        # 2. 결과 폴링 (최대 2.5분 대기)
+        for _ in range(30):
+            time.sleep(5)
+            result_payload = {
+                "clientKey": TWOCAPTCHA_API_KEY,
+                "taskId": task_id
+            }
+            res = std_requests.post("https://api.2captcha.com/getTaskResult", json=result_payload, timeout=15)
+            res_data = res.json()
+            
+            if res_data.get("errorId") != 0:
+                logger.error("2Captcha 결과 조회 실패: %s", res_data)
+                return None
+                
+            status = res_data.get("status")
+            if status == "ready":
+                token = res_data.get("solution", {}).get("token")
+                logger.info("✅ 2Captcha 해결 성공!")
+                return token
+                
+            logger.debug("2Captcha 해결 중... (상태: %s)", status)
+            
+        logger.error("❌ 2Captcha 시간 초과 (2.5분)")
+        return None
+    except Exception as e:
+        logger.error("❌ 2Captcha 연동 중 오류 발생: %s", e)
+        return None
+
+
+def _send_heartbeat(session: requests.Session, captcha_token: str | None = None) -> bool:
+    """
+    Suno 세션 활성화를 위해 /api/heartbeat/ 엔드포인트에 POST 요청을 보냅니다.
+    최근 422 에러 해결을 위해 필수적으로 요구되는 단계입니다.
+    """
+    token = captcha_token
+    
+    # 1. 전달받은 토큰이 없다면 2Captcha 시도
+    if not token and TWOCAPTCHA_API_KEY:
+        token = _solve_captcha_2captcha()
+        
+    # 2. 2Captcha도 실패하거나 설정되지 않았다면 기존 .env 토큰 폴백
+    if not token:
+        token = SUNO_CAPTCHA_TOKEN
+
+    if not token:
+        logger.warning("Heartbeat 전송 시도: CAPTCHA 토큰이 없습니다. (무시하고 계속 진행)")
+        return False
+
+    logger.info("Suno Heartbeat 전송 중... (token: %s...)", token[:16])
+    
+    payload = {
+        "captcha_token": token,
+        "captcha_action": "heartbeat"
+    }
+    
+    try:
+        response = session.post(
+            f"{SUNO_BASE_URL}/heartbeat/",
+            json=payload,
+            headers=_suno_headers(),
+            timeout=15,
+            impersonate=REQUESTS_IMPERSONATE
+        )
+        
+        if response.ok:
+            logger.info("✅ Suno Heartbeat 승인 완료!")
+            return True
+        else:
+            logger.error("❌ Suno Heartbeat 실패: %d | %s", response.status_code, response.text[:200])
+            return False
+    except Exception as e:
+        logger.error("❌ Suno Heartbeat 중 오류 발생: %s", e)
+        return False
+
+
 # 인증 객체 초기화
 suno_auth = SunoCookie(_COOKIE_STR or "")
 
@@ -398,10 +541,15 @@ def generate_and_download_audio(concept: dict) -> Path:
         session.headers.update(_SUNO_HEADERS)
 
         # 브라우저는 generate 전에 /api/c/check를 호출해 session-id를 받아 사용.
-        _pre_check(session)
+        sid = _pre_check(session)
+        if sid:
+            session.headers["session-id"] = sid
 
-        clip_ids  = _request_suno_generation(concept, session)
-        audio_url, lyrics = _poll_until_complete(clip_ids[0], session)
+        # [NEW] Heartbeat 전송 (422 에러 방어)
+        _send_heartbeat(session)
+
+        clip_ids  = _request_suno_generation(concept, session, sid)
+        audio_url, lyrics = _poll_until_complete(clip_ids[0], session, sid)
         concept["lyrics"] = lyrics
         file_path = _download_mp3(audio_url, session)
         
@@ -412,23 +560,35 @@ def generate_and_download_audio(concept: dict) -> Path:
 # ---------------------------------------------------------------------------
 # 내부 헬퍼 함수들
 # ---------------------------------------------------------------------------
-def _suno_headers() -> dict:
-    """매 요청마다 fresh browser-token 및 전체 쿠키를 포함한 인증 헤더 반환."""
+def _suno_headers(session_id: str | None = None) -> dict:
+    """매 요청마다 fresh한 인증 헤더 반환."""
+    cookie_str = suno_auth.get_cookie_string(include_session=True)
     token = suno_auth.get_token()
-    return {
+    
+    if session_id:
+        if "session-id=" not in cookie_str:
+            cookie_str += f"; session-id={session_id}"
+
+    headers = {
         **_SUNO_HEADERS,
-        "Authorization": f"Bearer {token}",
-        "Cookie":        suno_auth.get_cookie_string(),
-        "browser-token": _make_browser_token(),
+        "Cookie":        cookie_str,
         "device-id":     suno_auth.device_id,
     }
+    
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+        
+    if session_id:
+        headers["session-id"] = session_id
+        headers["x-session-id"] = session_id
+            
+    return headers
 
 
-def _pre_check(session: requests.Session) -> None:
+def _pre_check(session: requests.Session) -> str | None:
     """
     브라우저가 generate 전에 항상 호출하는 /api/c/check 엔드포인트.
-    응답 헤더의 session-id를 이후 모든 API 요청에 포함시켜야 함.
-    (access-control-expose-headers: session-id → JS가 읽어 사용)
+    응답 헤더의 session-id를 명시적으로 반환합니다.
     """
     try:
         resp = session.post(
@@ -440,19 +600,21 @@ def _pre_check(session: requests.Session) -> None:
         )
         sid = resp.headers.get("session-id", "")
         if sid:
-            session.headers["session-id"] = sid
             logger.info("사전 체크 완료 | session-id: %s", sid[:16] + "...")
+            return sid
         else:
             logger.debug("사전 체크 완료 (session-id 없음). 응답: %s", resp.text[:100])
     except Exception as e:
         logger.warning("사전 체크(/api/c/check) 실패: %s (무시하고 계속)", e)
+    return None
 
 
 @with_retry()
-def _request_suno_generation(concept: dict, session: requests.Session) -> list[str]:
+def _request_suno_generation(concept: dict, session: requests.Session, session_id: str | None = None) -> list[str]:
     """Suno API에 음악 생성 요청 후 clip_id 목록 반환."""
-    # Generate 호출 직전에 항상 session-id 갱신 시도 (재시도 시 갱신된 토큰으로 재발급)
-    _pre_check(session)
+    # 만약 session_id가 없다면 다시 갱신 시도
+    if not session_id:
+        session_id = _pre_check(session)
 
     prompt_lyrics = concept.get("lyrics", "")
     if isinstance(prompt_lyrics, dict):
@@ -473,8 +635,8 @@ def _request_suno_generation(concept: dict, session: requests.Session) -> list[s
         "prompt":            prompt_lyrics,
         "tags":              concept.get("audio_prompt", ""), 
         "title":             concept.get("title", ""),
-        "make_instrumental": False,  # 보컬 및 가사가 생성되도록 False로 변경
-        "mv":                "chirp-crow",
+        "make_instrumental": False,
+        "mv":                "chirp-crow", # 다시 chirp-crow로 복구
         "negative_tags":     "",
         "transaction_uuid":  str(uuid.uuid4()),
     }
@@ -482,7 +644,7 @@ def _request_suno_generation(concept: dict, session: requests.Session) -> list[s
     response = session.post(
         f"{SUNO_BASE_URL}/generate/v2/",
         json=payload,
-        headers=_suno_headers(),
+        headers=_suno_headers(session_id),
         timeout=30,
         impersonate=REQUESTS_IMPERSONATE,
     )
@@ -507,7 +669,7 @@ def _request_suno_generation(concept: dict, session: requests.Session) -> list[s
 
 
 @with_retry()
-def _poll_until_complete(clip_id: str, session: requests.Session) -> tuple[str, str]:
+def _poll_until_complete(clip_id: str, session: requests.Session, session_id: str | None = None) -> tuple[str, str]:
     """clip_id 상태를 폴링해 완료 시 audio_url 반환."""
     logger.info("음원 생성 대기 중... (clip_id: %s)", clip_id)
     elapsed = 0
@@ -516,7 +678,7 @@ def _poll_until_complete(clip_id: str, session: requests.Session) -> tuple[str, 
         response = session.get(
             f"{SUNO_BASE_URL}/feed/",
             params={"ids": clip_id},
-            headers=_suno_headers(),
+            headers=_suno_headers(session_id),
             timeout=30,
             impersonate=REQUESTS_IMPERSONATE,
         )
