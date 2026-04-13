@@ -2,8 +2,8 @@ name: Daily YouTube Shorts Automator
 
 on:
   schedule:
-    # 매일 UTC 00:00, 09:00 (한국 시간 오전 9시, 오후 6시)에 자동 실행
-    - cron: '0 0,9 * * *'
+    # 매일 4시간 간격으로 자동 실행 (UTC 0, 4, 8, 12, 16, 20)
+    - cron: '0 */4 * * *'
   workflow_dispatch: # GitHub 페이지에서 수동으로 실행 버튼 활성화
 
 permissions:

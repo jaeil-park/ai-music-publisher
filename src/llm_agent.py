@@ -19,22 +19,12 @@ logger = logging.getLogger(__name__)
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 CATEGORY_WEIGHTS = {
-    "걸그룹 K-POP (아이브/뉴진스 스타일)": 3,
-    "보이그룹 K-POP (BTS/세븐틴 스타일)": 3,
-    "K-POP 발라드 (드라마 OST 감성)": 3,
-    "K-POP R&B (어반/그루비)": 1,
-    "모던 트로트 (임영웅/영탁 스타일)": 1,
-    "인디 어쿠스틱 (10cm/적재 감성)": 1,
-    "인디 밴드 록 (DAY6/CNBLUE 스타일)": 1,
-    "한국 힙합/트랩 (지코/기리보이 스타일)": 1,
-    "EDM 빅룸 하우스 (페스티벌 트랙)": 1,
-    "시티팝/레트로 80s (야마시타 타츠로 스타일)": 1,
-    "라틴팝/레게톤 (댄서블한 리듬)": 1,
-    "로파이 재즈 칠아웃 (공부/수면 음악)": 1,
-    "어린이 동요/챈트 (유아 바이럴 훅)": 3,
-    "틱톡 밈 댄스곡 (챌린지 바이럴)": 3,
-    "헬스/운동 하이프 (BPM 140+ 동기부여)": 3,
-    "힐링/수면 음악 (ASMR 감성)": 3,
+    "최신 트렌드 K-POP 이지리스닝 (뉴진스/아일릿/르세라핌 스타일)": 4,
+    "트렌디 K-POP R&B/힙합 (키스오브라이프/에스파 스타일)": 3,
+    "청량 비트 K-POP 댄스곡 (아이브/스테이씨 스타일)": 3,
+    "감성 K-POP 발라드 (드라마 OST/아이유 감성)": 2,
+    "K-POP 보이그룹 스타일 파워풀 댄스 (BTS/스트레이키즈/라이즈 스타일)": 1,
+    "트렌디 K-POP 밴드 사운드 (DAY6/QWER 스타일)": 2,
 }
 
 def generate_daily_concept(ep_number: int) -> dict:
@@ -43,20 +33,18 @@ def generate_daily_concept(ep_number: int) -> dict:
         raise ValueError("OPENAI_API_KEY가 설정되지 않았습니다.")
 
     client = OpenAI(api_key=OPENAI_API_KEY)
-    random.seed(date.today().toordinal())
     
     categories = list(CATEGORY_WEIGHTS.keys())
     weights = list(CATEGORY_WEIGHTS.values())
     category = random.choices(categories, weights=weights, k=1)[0]
+    vocal_gender = random.choices(["female", "male"], weights=[8, 2], k=1)[0]
     
-    logger.info("오늘의 선정 카테고리: %s", category)
+    logger.info("오늘의 선정 카테고리: %s (Vocal: %s)", category, vocal_gender)
 
-    # K-POP 계열 카테고리에 한국어 보컬 명시 힌트 추가
-    kpop_hint = ""
-    if any(k in category for k in ["K-POP", "트로트", "인디", "힙합", "틱톡", "어린이"]):
-        kpop_hint = "\n    [중요] audio_prompt에 반드시 'Korean female/male vocalist', 'K-POP style vocal', 'Korean lyrics' 표현을 포함하세요."
+    # K-POP 최신 트렌드 반영 및 8:2 성별 가중치 적용 힌트
+    kpop_hint = f"\n    [중요] audio_prompt에 반드시 최신 K-POP 트렌드를 반영하여 세련되게 묘사하고, 'Korean {vocal_gender} vocalist', 'trendy K-POP style', 'Korean lyrics' 표현을 포함하세요."
 
-    system_prompt = "당신은 숏폼 콘텐츠를 기획하는 전문 AI 디렉터입니다. 반드시 유효한 JSON 형식으로 응답하세요."
+    system_prompt = "당신은 최신 트렌드를 선도하는 K-POP 숏폼 콘텐츠를 기획하는 전문 AI 디렉터입니다. 반드시 유효한 JSON 형식으로 응답하세요."
     user_prompt = f"""
     오늘의 테마는 '{category}' 입니다. 아래 JSON 스키마로 기획안을 작성해주세요.{kpop_hint}
     
