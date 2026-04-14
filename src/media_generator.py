@@ -69,6 +69,10 @@ _SUNO_HEADERS = {
     "sec-ch-ua":         '"Google Chrome";v="147", "Not.A/Brand";v="8", "Chromium";v="147"',
     "sec-ch-ua-mobile":  "?0",
     "sec-ch-ua-platform": '"Windows"',
+    "Origin":            "https://suno.com",
+    "sec-fetch-dest":    "empty",
+    "sec-fetch-mode":    "cors",
+    "sec-fetch-site":    "same-site",
 }
 
 
@@ -85,7 +89,7 @@ class SunoCookie:
 
     def __init__(self, cookie_str: str = ""):
         self._raw = cookie_str.strip()
-        self._token: str | None = None
+        self._token: str | None = self._get("__session")
 
     def _get(self, name: str) -> str | None:
         for part in self._raw.split(";"):
@@ -125,6 +129,16 @@ class SunoCookie:
         """auth.suno.com 전용 __client 쿠키값."""
         return self._get("__client")
 
+    def update_uat(self):
+        """
+        Clerk/Suno 보안 시스템을 위해 User Active Timestamp(UAT)를 현재 시간으로 갱신합니다.
+        이는 '활동 중인 세션'임을 증명하는 데 도움이 됩니다.
+        """
+        now_ts = str(int(time.time()))
+        self._update_raw_cookie("__client_uat", now_ts)
+        self._update_raw_cookie("__client_uat_Jnxw-muT", now_ts)
+        # logger.debug("User Active Timestamp (UAT) 갱신됨: %s", now_ts)
+
     def _update_raw_cookie(self, name: str, value: str):
         """_raw 쿠키 문자열에서 특정 쿠키 값을 in-place 갱신."""
         parts = self._raw.split(";")
@@ -148,7 +162,12 @@ class SunoCookie:
         for p in parts:
             p = p.strip()
             if not p: continue
-            name = p.split("=")[0]
+            mapping = p.split("=", 1)
+            if len(mapping) < 2: 
+                new_parts.append(p)
+                continue
+                
+            name = mapping[0]
             
             # __session은 가변적이므로 따로 처리
             if name == "__session":
@@ -185,14 +204,14 @@ class SunoCookie:
 
     def load_initial_token(self):
         """
-        항상 POST /touch를 통해 sid가 포함된 최신 JWT를 발급받습니다.
-
-        쿠키의 __session을 직접 사용하지 않는 이유:
-        Suno가 JWT 템플릿을 업데이트해 'sid'(세션 ID) 클레임이 필수가 됨.
-        기존 쿠키의 __session은 구형 템플릿으로 발급돼 sid가 없어 422 반환.
-        POST /touch만이 sid가 포함된 최신 형식 JWT를 반환함.
+        토큰이 없는 경우에만 POST /touch를 시도합니다.
+        이미 토큰(__session)이 있는 경우 브라우저에서 인증된 상태일 수 있으므로 그대로 사용합니다.
         """
-        logger.info("POST /touch를 통해 최신 JWT(sid 포함)를 발급받습니다...")
+        if self._token:
+            logger.info("기존 유효한 토큰(__session)이 발견되어 갱신 없이 사용을 시도합니다.")
+            return
+            
+        logger.info("토큰이 없거나 만료되어 POST /touch를 통한 발급을 시도합니다...")
         self.refresh_token()
         save_updated_cookie_to_env()
 
@@ -208,7 +227,18 @@ class SunoCookie:
         # Clerk 호출 시에도 가급적 전체 쿠키(context)를 실어 보냄
         # 단, __session은 제외 (있을 경우 간섭 가능성)
         clerk_cookie_str = self.get_cookie_string(include_session=False)
-        auth_headers = {**_SUNO_HEADERS, "Cookie": clerk_cookie_str}
+        session_id = self.session_id
+        if not session_id:
+             logger.warning("Clerk session_id를 찾을 수 없어 /touch를 진행할 수 없습니다. (쿠키 직접 사용 시도)")
+             return
+
+        url = f"https://auth.suno.com/v1/client/sessions/{session_id}/touch?__clerk_api_version={CLERK_API_VERSION}&_clerk_js_version={CLERK_JS_VERSION}"
+        
+        auth_headers = {
+            **_SUNO_HEADERS, 
+            "Cookie": clerk_cookie_str,
+            "Content-Type": "application/x-www-form-urlencoded"
+        }
         qs           = f"__clerk_api_version={CLERK_API_VERSION}&_clerk_js_version={CLERK_JS_VERSION}"
 
         # Step 1: session_id 및 세션 상태 확인
@@ -562,25 +592,28 @@ def generate_and_download_audio(concept: dict) -> Path:
 # ---------------------------------------------------------------------------
 def _suno_headers(session_id: str | None = None) -> dict:
     """매 요청마다 fresh한 인증 헤더 반환."""
+    suno_auth.update_uat() # 요청 전 UAT 갱신
     cookie_str = suno_auth.get_cookie_string(include_session=True)
     token = suno_auth.get_token()
     
-    if session_id:
-        if "session-id=" not in cookie_str:
-            cookie_str += f"; session-id={session_id}"
-
+    # [수정] studio-api-prod는 브라우저에서 받은 session-id(hex)를 우선적으로 사용합니다.
+    # Clerk sid는 JWT 내부에 들어있으므로 헤더에는 Suno 전용 ID를 보내는 것이 안전합니다.
+    effective_sid = session_id or suno_auth.session_id
+    
+    # [수정] session-id는 헤더로만 전송하고 쿠키 문자열에는 포함하지 않는 것이 브라우저의 일반적인 동작입니다.
     headers = {
         **_SUNO_HEADERS,
         "Cookie":        cookie_str,
         "device-id":     suno_auth.device_id,
+        "browser-token": _make_browser_token(),
     }
     
+    if effective_sid:
+        headers["session-id"] = effective_sid
+        headers["x-session-id"] = effective_sid
+        
     if token:
         headers["Authorization"] = f"Bearer {token}"
-        
-    if session_id:
-        headers["session-id"] = session_id
-        headers["x-session-id"] = session_id
             
     return headers
 
@@ -641,6 +674,9 @@ def _request_suno_generation(concept: dict, session: requests.Session, session_i
         "transaction_uuid":  str(uuid.uuid4()),
     }
 
+    # 422 에러 방지를 위해 요청 전 약간의 대기
+    time.sleep(1)
+
     response = session.post(
         f"{SUNO_BASE_URL}/generate/v2/",
         json=payload,
@@ -649,7 +685,7 @@ def _request_suno_generation(concept: dict, session: requests.Session, session_i
         impersonate=REQUESTS_IMPERSONATE,
     )
 
-    logger.info("Suno 응답 %d | %s", response.status_code, response.text[:300])
+    logger.info("Suno 응답 %d | %s", response.status_code, response.text[:500])
 
     if response.status_code == 402 or any(
         kw in response.text.lower() for kw in ("credit", "insufficient")
